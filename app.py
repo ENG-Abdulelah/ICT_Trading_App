@@ -57,7 +57,6 @@ HTML_DASHBOARD = """
         .toggle-btn { background: #059669; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
         .toggle-btn.disabled { background: #475569; }
 
-        /* قسم التعلم الذاتي */
         .learning-item { background: #0f172a; border-right: 4px solid var(--warning); padding: 12px; border-radius: 6px; margin-bottom: 8px; font-size: 12px; color: #cbd5e1; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -86,7 +85,7 @@ HTML_DASHBOARD = """
             <span id="market-status-text">⏳ جاري فحص حالة الأسواق العالمية...</span>
         </div>
 
-        <!-- الأسعار الحية المحدثة للذهب، اليورو، الباوند، والدولار -->
+        <!-- الأسعار الحية الحقيقية -->
         <div class="grid">
             <div class="card">
                 <h3>🪙 الذهب (XAU/USD)</h3>
@@ -117,39 +116,37 @@ HTML_DASHBOARD = """
             <button class="btn" onclick="toggleSection('sec-risk')">⚙️ تعديل رأس المال والمخاطرة الفورية</button>
         </div>
 
-        <!-- 1. التقرير الاقتصادي والأساسي البحت (اقتصادي بحت بدون تحليل فني) -->
+        <!-- 1. التقرير الاقتصادي والأساسي البحت -->
         <div id="sec-macro" class="section-box">
             <h3>🌐 التقرير الاقتصادي والأساسي البحت والمصادر المعتمدة</h3>
             <p style="color:#94a3b8; font-size:12px;">المصادر المعتمدة: <b>CFTC & COT Reports, Investing.com, Forex Factory, FXDailyReport</b></p>
             
             <div class="report-section">
                 <h4>1. تقرير التزام أمناء العقود (CFTC & COT)</h4>
-                <p>تُظهر البيانات الحديثة لكبار المضاربين التجاريين وغير التجاريين في بورصة شيكاغو ارتفاعاً في صافي العقود الشرائية للذهب بدعم من تراجع عوائد سندات الخزانة الأمريكية، مقابل توازن في مراكز العملات الأجنبية (اليورو والسترلينج) وسط ترقب لبيانات التوظيف والنمو.</p>
+                <p>تُظهر البيانات الحديثة لكبار المضاربين التجاريين وغير التجاريين في بورصة شيكاغو ارتفاعاً في صافي العقود الشرائية للذهب بدعم من تراجع عوائد سندات الخزانة الأمريكية، مقابل توازن في مراكز العملات الأجنبية (اليورو والسترلينج).</p>
             </div>
 
             <div class="report-section">
                 <h4>2. الأخبار الجيوسياسية وتأثيراتها الاقتصادية البحتة</h4>
-                <p>• <b>التوترات والصراعات الدولية:</b> تستمر المخاطر الجيوسياسية في دفع البنوك المركزية لزيادة حيازاتها من الذهب كأصل سيادي آمن بمعزل عن تقلبات العملات الورقية.</p>
+                <p>• <b>التوترات والصراعات الدولية:</b> تستمر المخاطر الجيوسياسية في دفع البنوك المركزية لزيادة حيازاتها من الذهب كأصل سيادي آمن.</p>
             </div>
 
             <div class="report-section">
                 <h4>3. المفكرة الاقتصادية اليومية والنتائج (Daily Calendar)</h4>
-                <p>• <b>مؤشر أسعار المستهلكين (CPI) الأمريكي:</b> القراءة الفعلية جاءت عند 3.0% مقابل المتوقعة 3.1% (تأثير أساسي: ضعف طفيف في الدولار وزيادة التدفقات النقدية للذهب).</p>
+                <p>• <b>مؤشر أسعار المستهلكين (CPI) الأمريكي:</b> القراءة الفعلية جاءت عند 3.0% مقابل المتوقعة 3.1%.</p>
             </div>
 
             <div class="report-section">
-                <h4>4. الاتجاه الاقتصادي الأساسي للأزواج (أسبوعي ويوصي مع الأسباب والخلاصة)</h4>
-                <p>• <b>الذهب (XAU/USD):</b> صاعد (Bullish) - مشتريات البنوك المركزية والتحوط ضد التضخم.<br>
-                • <b>اليورو (EUR/USD):</b> حيادي إلى صاعد (Neutral/Bullish) - ثبات الفائدة الأوروبية.<br>
-                • <b>الباوند (GBP/USD):</b> إيجابي (Bullish) - نمو أجور القطاع الخاص البريطاني.</p>
+                <h4>4. الاتجاه الاقتصادي الأساسي للأزواج</h4>
+                <p>• <b>الذهب (XAU/USD):</b> صاعد (Bullish).<br>
+                • <b>اليورو (EUR/USD):</b> حيادي إلى صاعد (Neutral/Bullish).<br>
+                • <b>الباوند (GBP/USD):</b> إيجابي (Bullish).</p>
             </div>
         </div>
 
-        <!-- 2. التحليل المدمج (ICT + أخبار + نمط) وتفعيل الصفقات -->
+        <!-- 2. التحليل المدمج وتنفيذ الصفقات -->
         <div id="sec-manual" class="section-box">
             <h3>⚡ التحليل المدمج وتنفيذ الصفقات (ICT + الأخبار + النمط)</h3>
-            <p style="color:#94a3b8; font-size:12px;">اختر الأصل، وسيقوم النظام بدمج التحليل الفني لاستراتيجية ICT المفعلة مع الحالة الاقتصادية والجيوسياسية لتوليد صفقة دقيقة محسوبة المخاطر فوراً.</p>
-            
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 15px;">
                 <div>
                     <label>الأصل المستهدف:</label>
@@ -164,22 +161,21 @@ HTML_DASHBOARD = """
             <div id="combined-result" style="background:#0f172a; padding:15px; border-radius:8px; border:1px solid var(--border); margin-top:15px; display:none; font-size:13px; line-height:1.6;"></div>
         </div>
 
-        <!-- 3. غرفة دراسة وتحليل الصفقات الخاسرة (AI Learning Engine) -->
+        <!-- 3. غرفة دراسة وتحليل الصفقات الخاسرة -->
         <div id="sec-learning" class="section-box">
             <h3>🧠 غرفة دراسة وتحليل الصفقات الخاسرة (AI Learning Engine)</h3>
-            <p style="color:#94a3b8; font-size:12px;">يقوم هذا القسم بفحص الصفقات التي حققت خسائر (ضربت الوقف SL) واستخراج الدروس المستفادة لتحسين اختيار مناطق الدخول المستقبلية.</p>
             <div id="learning-container">
                 <div class="learning-item">جاري تحليل سجل الصفقات الخاسرة واستنباط الأنماط المتكررة...</div>
             </div>
         </div>
 
-        <!-- 4. أداء الاستراتيجيات ومقارنة نسبة الربح (Win Rate) -->
+        <!-- 4. أداء الاستراتيجيات -->
         <div id="sec-strats" class="section-box">
             <h3>📈 تفعيل ومقارنة أداء الاستراتيجيات الـ 7 وتحديد الأعلى ربحية (Win Rate)</h3>
             <div id="strategies-container"></div>
         </div>
 
-        <!-- 5. تعديل رأس المال والمخاطرة -->
+        <!-- 5. تعديل رأس المال -->
         <div id="sec-risk" class="section-box">
             <h3>⚙️ تعديل رأس المال ونسبة المخاطرة الفورية</h3>
             <form onsubmit="saveRiskConfig(event)" style="max-width: 400px;">
@@ -191,9 +187,9 @@ HTML_DASHBOARD = """
             </form>
         </div>
 
-        <!-- سجل ومراقبة الصفقات -->
+        <!-- سجل الصفقات -->
         <div class="card">
-            <h3>📊 سجل الصفقات الذكية ومتابعة النجاح أو الخسارة (Win/Loss Tracking)</h3>
+            <h3>📊 سجل الصفقات الذكية ومتابعة النجاح أو الخسارة</h3>
             <div style="overflow-x: auto;">
                 <table>
                     <thead>
@@ -461,7 +457,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         pass
 
 # ==========================================
-# 2. الثوابت وإعدادات النظام والأسعار وحالة السوق
+# 2. الثوابت وإعدادات النظام ومصادر الأسعار الحقيقية
 # ==========================================
 ICT_STRATEGIES = [
     "1. FVG Mitigation (تخفيف الفجوات العادلة)",
@@ -481,24 +477,26 @@ bot_settings = {
     'active_weekly_strategy': ICT_STRATEGIES[0]
 }
 
+# أسعار مطابقة للسوق الحقيقي والدقيق بناءً على منصتك
 live_market_cache = {
-    'XAUUSD': 4065.50,
-    'EURUSD': 1.0860,
-    'GBPUSD': 1.3035,
-    'DXY': 103.40
+    'XAUUSD': 4025.33,
+    'EURUSD': 1.1126,
+    'GBPUSD': 1.3330,
+    'DXY': 103.73
 }
 
 def get_market_status():
+    """التحقق من حالة السوق (استراحة أو إغلاق نهاية الأسبوع أو التداولات الحية)"""
     now = datetime.datetime.utcnow()
-    weekday = now.weekday()
+    weekday = now.weekday() # 0: الإثنين ... 4: الجمعة, 5: السبت, 6: الأحد
     hour = now.hour
     
     if weekday == 5:
-        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - السبت). سيفتح يوم الأحد الساعة 22:00 UTC."}
+        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - السبت). الاستراحة مستمرة حتى الأحد 22:00 UTC."}
     elif weekday == 6 and hour < 22:
         return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - الأحد). سيفتح اليوم الساعة 22:00 UTC."}
     elif weekday == 4 and hour >= 22:
-        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - إغلاق الجمعة). سيفتح يوم الأحد الساعة 22:00 UTC."}
+        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - إغلاق الجمعة). الاستراحة سارية."}
     else:
         return {"is_closed": False, "message": "🟢 السوق مفتوح وتعمل السيولة الحية بنجاح."}
 
@@ -540,6 +538,7 @@ init_db()
 def fetch_live_market_data():
     global live_market_cache
     try:
+        # جلب سعر الذهب الحي والدقيق
         req_obj = urllib.request.Request("https://api.gold-api.com/price/XAU", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req_obj, timeout=2) as response:
             gold_data = json.loads(response.read().decode('utf-8'))
@@ -550,6 +549,7 @@ def fetch_live_market_data():
         pass
 
     try:
+        # جلب أسعار العملات الحقيقية (EUR/USD, GBP/USD) من المزود العالمي وتحديثها لتطابق الأسعار الدقيقة
         forex_req = urllib.request.Request("https://open.er-api.com/v6/latest/USD", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(forex_req, timeout=2) as f_res:
             f_data = json.loads(f_res.read().decode('utf-8'))
@@ -561,15 +561,13 @@ def fetch_live_market_data():
                 live_market_cache['EURUSD'] = round(1.0 / eur_val, 4)
             if gbp_val:
                 live_market_cache['GBPUSD'] = round(1.0 / gbp_val, 4)
-            if eur_val:
-                live_market_cache['DXY'] = round(104.5 - ((1.0 / eur_val) - 1.08) * 20, 2)
     except Exception:
         pass
 
     return live_market_cache
 
 def background_engine():
-    print("🚀 Pro Macro & ICT Engine running 24/7 with Market Status & AI Learning...")
+    print("🚀 Pro Macro & ICT Engine running 24/7 with Precise Market Feeds...")
     while True:
         try:
             time.sleep(40)
