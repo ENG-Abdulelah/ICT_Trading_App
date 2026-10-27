@@ -17,7 +17,7 @@ HTML_DASHBOARD = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Trading & Macro Intelligence Engine - AI Enhanced</title>
+    <title>Pro Trading & Macro Intelligence Engine - Live Fixed</title>
     <style>
         :root { --bg-color: #0b0f19; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; --border: #334155; --success: #10b981; --danger: #f43f5e; --warning: #f59e0b; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
@@ -85,7 +85,7 @@ HTML_DASHBOARD = """
             <span id="market-status-text">⏳ جاري فحص حالة الأسواق العالمية...</span>
         </div>
 
-        <!-- الأسعار الحية الحقيقية -->
+        <!-- الأسعار المباشرة من السوق -->
         <div class="grid">
             <div class="card">
                 <h3>🪙 الذهب (XAU/USD)</h3>
@@ -116,35 +116,29 @@ HTML_DASHBOARD = """
             <button class="btn" onclick="toggleSection('sec-risk')">⚙️ تعديل رأس المال والمخاطرة الفورية</button>
         </div>
 
-        <!-- 1. التقرير الاقتصادي والأساسي البحت -->
+        <!-- 1. التقرير الاقتصادي -->
         <div id="sec-macro" class="section-box">
             <h3>🌐 التقرير الاقتصادي والأساسي البحت والمصادر المعتمدة</h3>
             <p style="color:#94a3b8; font-size:12px;">المصادر المعتمدة: <b>CFTC & COT Reports, Investing.com, Forex Factory, FXDailyReport</b></p>
-            
             <div class="report-section">
                 <h4>1. تقرير التزام أمناء العقود (CFTC & COT)</h4>
-                <p>تُظهر البيانات الحديثة لكبار المضاربين التجاريين وغير التجاريين في بورصة شيكاغو ارتفاعاً في صافي العقود الشرائية للذهب بدعم من تراجع عوائد سندات الخزانة الأمريكية، مقابل توازن في مراكز العملات الأجنبية (اليورو والسترلينج).</p>
+                <p>تُظهر البيانات الحديثة لكبار المضاربين التجاريين وغير التجاريين في بورصة شيكاغو ارتفاعاً في صافي العقود الشرائية للذهب وسط توازن مراكز العملات.</p>
             </div>
-
             <div class="report-section">
-                <h4>2. الأخبار الجيوسياسية وتأثيراتها الاقتصادية البحتة</h4>
-                <p>• <b>التوترات والصراعات الدولية:</b> تستمر المخاطر الجيوسياسية في دفع البنوك المركزية لزيادة حيازاتها من الذهب كأصل سيادي آمن.</p>
+                <h4>2. الأخبار الجيوسياسية</h4>
+                <p>• استمرار الطلب على الملاذ الآمن (الذهب) نتيجة المخاطر السياسية.</p>
             </div>
-
             <div class="report-section">
-                <h4>3. المفكرة الاقتصادية اليومية والنتائج (Daily Calendar)</h4>
-                <p>• <b>مؤشر أسعار المستهلكين (CPI) الأمريكي:</b> القراءة الفعلية جاءت عند 3.0% مقابل المتوقعة 3.1%.</p>
+                <h4>3. المفكرة الاقتصادية والنتائج</h4>
+                <p>• مؤشر التضخم الأمريكي CPI عند 3.0% (إيجابي للذهب).</p>
             </div>
-
             <div class="report-section">
-                <h4>4. الاتجاه الاقتصادي الأساسي للأزواج</h4>
-                <p>• <b>الذهب (XAU/USD):</b> صاعد (Bullish).<br>
-                • <b>اليورو (EUR/USD):</b> حيادي إلى صاعد (Neutral/Bullish).<br>
-                • <b>الباوند (GBP/USD):</b> إيجابي (Bullish).</p>
+                <h4>4. الاتجاه الأساسي للأزواج</h4>
+                <p>• <b>الذهب:</b> صاعد | <b>اليورو:</b> حيادي/صاعد | <b>الباوند:</b> إيجابي.</p>
             </div>
         </div>
 
-        <!-- 2. التحليل المدمج وتنفيذ الصفقات -->
+        <!-- 2. التحليل المدمج والصفقات -->
         <div id="sec-manual" class="section-box">
             <h3>⚡ التحليل المدمج وتنفيذ الصفقات (ICT + الأخبار + النمط)</h3>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 15px;">
@@ -157,11 +151,11 @@ HTML_DASHBOARD = """
                     </select>
                 </div>
             </div>
-            <button class="btn btn-active" onclick="executeCombinedTrade()">تنفيذ وتفعيل الصفقة المدمجة بناءً على استراتيجية ICT ورأس المال 🎯</button>
+            <button class="btn btn-active" onclick="executeCombinedTrade()">تنفيذ وتفعيل الصفقة المدمجة بناءً على رأس المال المحدث 🎯</button>
             <div id="combined-result" style="background:#0f172a; padding:15px; border-radius:8px; border:1px solid var(--border); margin-top:15px; display:none; font-size:13px; line-height:1.6;"></div>
         </div>
 
-        <!-- 3. غرفة دراسة وتحليل الصفقات الخاسرة -->
+        <!-- 3. غرفة التعلم الذاتي -->
         <div id="sec-learning" class="section-box">
             <h3>🧠 غرفة دراسة وتحليل الصفقات الخاسرة (AI Learning Engine)</h3>
             <div id="learning-container">
@@ -175,7 +169,7 @@ HTML_DASHBOARD = """
             <div id="strategies-container"></div>
         </div>
 
-        <!-- 5. تعديل رأس المال -->
+        <!-- 5. تعديل رأس المال والمخاطرة (تم إصلاح المشكلة) -->
         <div id="sec-risk" class="section-box">
             <h3>⚙️ تعديل رأس المال ونسبة المخاطرة الفورية</h3>
             <form onsubmit="saveRiskConfig(event)" style="max-width: 400px;">
@@ -260,10 +254,10 @@ HTML_DASHBOARD = """
                             let isActive = s.name === data.settings.active_weekly_strategy;
                             html += `<div class="strat-card">
                                 <div class="strat-info">
-                                    <b>📌 ${s.name}</b> ${isActive ? '<span style="color:#10b981;">[الاستراتيجية المفعلة حالياً] 🟢</span>' : '<span style="color:#94a3b8;">[متاحة للاختيار] ⚪</span>'}
-                                    <div class="strat-stats">إجمالي الصفقات: ${s.total} | أهداف ناجحة: ✅ ${s.win} | وقف محقق: ❌ ${s.loss} | نسبة النجاح (Win Rate): 🎯 <b>${s.win_rate}%</b></div>
+                                    <b>📌 ${s.name}</b> ${isActive ? '<span style="color:#10b981;">[المفعلة حالياً] 🟢</span>' : '<span style="color:#94a3b8;">[متاحة] ⚪</span>'}
+                                    <div class="strat-stats">الصفقات: ${s.total} | ربح: ✅ ${s.win} | خسارة: ❌ ${s.loss} | نسبة النجاح: 🎯 <b>${s.win_rate}%</b></div>
                                 </div>
-                                <button class="toggle-btn ${isActive ? 'disabled' : ''}" onclick="activateStrategy('${s.name}')">${isActive ? 'مفعلة' : 'اختيار وتفعيل 🎯'}</button>
+                                <button class="toggle-btn ${isActive ? 'disabled' : ''}" onclick="activateStrategy('${s.name}')">${isActive ? 'مفعلة' : 'تفعيل 🎯'}</button>
                             </div>`;
                         });
                         document.getElementById('strategies-container').innerHTML = html;
@@ -276,7 +270,7 @@ HTML_DASHBOARD = """
                         });
                         document.getElementById('learning-container').innerHTML = lHtml;
                     } else {
-                        document.getElementById('learning-container').innerHTML = `<div class="learning-item">✅ لم يتم تسجيل صفقات خاسرة حتى الآن. نظام التعلم الذاتي يراقب بانتظار النتائج.</div>`;
+                        document.getElementById('learning-container').innerHTML = `<div class="learning-item">✅ لا توجد صفقات خاسرة مسجلة حالياً.</div>`;
                     }
 
                     let tbody = document.getElementById('trades-table');
@@ -320,10 +314,17 @@ HTML_DASHBOARD = """
 
         function saveRiskConfig(e) {
             e.preventDefault();
-            let cap = document.getElementById('inp-capital').value;
-            let risk = document.getElementById('inp-risk').value;
-            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'save_risk', capital: cap, risk_pct: risk})}).then(() => {
-                alert('✅ تم حفظ رأس المال ونسبة المخاطرة وتحديث حسابات العقود بنجاح');
+            let cap = parseFloat(document.getElementById('inp-capital').value);
+            let risk = parseFloat(document.getElementById('inp-risk').value);
+            
+            fetch('/api/action', {
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'save_risk', capital: cap, risk_pct: risk})
+            })
+            .then(res => res.json())
+            .then(data => {
+                alert('✅ تم حفظ وتحديث رأس المال ونسبة المخاطرة بنجاح!');
                 updateDashboard();
             });
         }
@@ -332,18 +333,17 @@ HTML_DASHBOARD = """
             let ast = document.getElementById('comb-asset').value;
             fetch('/api/action', {
                 method: 'POST', 
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({action: 'combined_trade', asset: ast})
             })
             .then(res => res.json())
             .then(data => {
                 let box = document.getElementById('combined-result');
                 box.style.display = 'block';
-                box.innerHTML = `<b>🎯 تم تفعيل الصفقة المدمجة بنجاح:</b><br>
-                • الأصل: <b>${data.asset}</b> | النمط: <b>${data.style}</b> | الاتجاه: <b>${data.direction}</b><br>
-                • استراتيجية ICT المستخدمة: <code style="color:var(--accent);">${data.strategy}</code><br>
-                • حجم العقد المحسوب (Lot): <b style="color:var(--success);">${data.lot} Lot</b> (المخاطرة: $${data.risk_amt})<br>
-                • الدخول: <code>${data.entry}</code> | SL: <code style="color:red;">${data.sl}</code> | TP: <code style="color:green;">${data.tp}</code><br>
-                ✅ <i>تم إدراج الصفقة في جدول المراقبة الحية لتقييم أدائها ونسبة نجاحها.</i>`;
+                box.innerHTML = `<b>🎯 تم تفعيل الصفقة بنجاح بناءً على رأس المال المحدث:</b><br>
+                • الأصل: <b>${data.asset}</b> | الاتجاه: <b>${data.direction}</b><br>
+                • حجم العقد (Lot): <b style="color:var(--success);">${data.lot} Lot</b> (المخاطرة: $${data.risk_amt})<br>
+                • الدخول: <code>${data.entry}</code> | SL: <code style="color:red;">${data.sl}</code> | TP: <code style="color:green;">${data.tp}</code>`;
                 updateDashboard();
             });
         }
@@ -412,8 +412,9 @@ class SimpleHandler(BaseHTTPRequestHandler):
                 elif act == 'set_strategy':
                     bot_settings['active_weekly_strategy'] = data.get('strategy')
                 elif act == 'save_risk':
-                    bot_settings['capital'] = float(data.get('capital', 1000))
-                    bot_settings['risk_pct'] = float(data.get('risk_pct', 1.0))
+                    # معالجة وحفظ تعديلات رأس المال والمخاطرة بدقة
+                    bot_settings['capital'] = float(data.get('capital', bot_settings['capital']))
+                    bot_settings['risk_pct'] = float(data.get('risk_pct', bot_settings['risk_pct']))
                 elif act == 'combined_trade':
                     ast = data.get('asset', 'XAUUSD')
                     price = live_market_cache.get(ast, 2800.0)
@@ -457,7 +458,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         pass
 
 # ==========================================
-# 2. الثوابت وإعدادات النظام ومصادر الأسعار الحقيقية
+# 2. الثوابت وإعدادات النظام وجلب الأسعار المباشرة الدقيقة
 # ==========================================
 ICT_STRATEGIES = [
     "1. FVG Mitigation (تخفيف الفجوات العادلة)",
@@ -477,7 +478,6 @@ bot_settings = {
     'active_weekly_strategy': ICT_STRATEGIES[0]
 }
 
-# أسعار مطابقة للسوق الحقيقي والدقيق بناءً على منصتك
 live_market_cache = {
     'XAUUSD': 4025.33,
     'EURUSD': 1.1126,
@@ -486,9 +486,9 @@ live_market_cache = {
 }
 
 def get_market_status():
-    """التحقق من حالة السوق (استراحة أو إغلاق نهاية الأسبوع أو التداولات الحية)"""
+    """كشف حالة السوق (مفتوح / استراحة نهاية الأسبوع)"""
     now = datetime.datetime.utcnow()
-    weekday = now.weekday() # 0: الإثنين ... 4: الجمعة, 5: السبت, 6: الأحد
+    weekday = now.weekday()
     hour = now.hour
     
     if weekday == 5:
@@ -538,9 +538,9 @@ init_db()
 def fetch_live_market_data():
     global live_market_cache
     try:
-        # جلب سعر الذهب الحي والدقيق
+        # جلب أسعار مباشرة ومحدثة للذهب والعملات من السوق
         req_obj = urllib.request.Request("https://api.gold-api.com/price/XAU", headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req_obj, timeout=2) as response:
+        with urllib.request.urlopen(req_obj, timeout=3) as response:
             gold_data = json.loads(response.read().decode('utf-8'))
             price_val = float(gold_data.get('price', 0))
             if 1000 < price_val < 6000:
@@ -549,9 +549,8 @@ def fetch_live_market_data():
         pass
 
     try:
-        # جلب أسعار العملات الحقيقية (EUR/USD, GBP/USD) من المزود العالمي وتحديثها لتطابق الأسعار الدقيقة
         forex_req = urllib.request.Request("https://open.er-api.com/v6/latest/USD", headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(forex_req, timeout=2) as f_res:
+        with urllib.request.urlopen(forex_req, timeout=3) as f_res:
             f_data = json.loads(f_res.read().decode('utf-8'))
             rates = f_data.get('rates', {})
             eur_val = rates.get('EUR')
@@ -567,10 +566,10 @@ def fetch_live_market_data():
     return live_market_cache
 
 def background_engine():
-    print("🚀 Pro Macro & ICT Engine running 24/7 with Precise Market Feeds...")
+    print("🚀 Pro Macro & ICT Engine running 24/7 with Live Market Feeds & Risk Fix...")
     while True:
         try:
-            time.sleep(40)
+            time.sleep(30)
             fetch_live_market_data()
             
             m_status = get_market_status()
@@ -604,6 +603,7 @@ def background_engine():
                 conn.commit()
                 conn.close()
 
+            # تقييم ومراقبة الصفقات الحية واستنباط التعلم الذاتي
             conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
             cursor = conn.cursor()
             cursor.execute("SELECT id, asset, strategy_used, entry, sl, tp, direction FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
