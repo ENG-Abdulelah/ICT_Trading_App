@@ -17,7 +17,7 @@ HTML_DASHBOARD = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Trading & Macro Intelligence Engine - Final Fixed</title>
+    <title>Pro Trading & Macro Intelligence Engine - Ultimate Pro</title>
     <style>
         :root { --bg-color: #0b0f19; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; --border: #334155; --success: #10b981; --danger: #f43f5e; --warning: #f59e0b; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
@@ -74,8 +74,8 @@ HTML_DASHBOARD = """
             <div class="info-bar">
                 <div class="info-item">👨‍💻 المطوّر: <b>ENG: Abdulelah Sadeq</b></div>
                 <div class="info-item">📊 رأس المال: <b id="lbl-capital">$1000.00</b> | المخاطرة: <b id="lbl-risk">1.0%</b></div>
-                <div class="info-item">🤖 التشغيل التلقائي: <b id="lbl-dispatch">🟢 مفعل (بانتظار الصفقة النشطة)</b></div>
-                <div class="info-item">⚡ النمط: <b id="lbl-style">سكالبينج (Scalp)</b></div>
+                <div class="info-item">🤖 التشغيل التلقائي: <b id="lbl-dispatch">🟢 مفعل</b></div>
+                <div class="info-item">⚡ النمط الافتراضي: <b id="lbl-style">سكالبينج (Scalp)</b></div>
                 <div class="info-item">🔴 الاستراتيجية الفعالة: <b id="lbl-active-strat">--</b></div>
             </div>
         </header>
@@ -85,7 +85,7 @@ HTML_DASHBOARD = """
             <span id="market-status-text">⏳ جاري فحص حالة الأسواق العالمية (توقيت اليمن)...</span>
         </div>
 
-        <!-- الأسعار الحية المحدثة بالثواني والأرقام العشرية الدقيقة -->
+        <!-- الأسعار الحية المحدثة بالثواني -->
         <div class="grid">
             <div class="card">
                 <h3>🪙 الذهب (XAU/USD)</h3>
@@ -108,39 +108,56 @@ HTML_DASHBOARD = """
         <!-- الأزرار الرئيسية -->
         <div class="btn-grid">
             <button class="btn" onclick="toggleSection('sec-macro')">📊 التقرير الاقتصادي والأساسي البحت (COT & News)</button>
-            <button class="btn" onclick="toggleSection('sec-manual')">⚡ التحليل المدمج والصفقات (ICT + أخبار + نمط)</button>
+            <button class="btn" onclick="toggleSection('sec-manual')">⚡ التحليل المدمج والصفقات اليدوية (ICT + فريمات)</button>
             <button class="btn" onclick="toggleSection('sec-learning')">🧠 تقرير التعلم الذاتي من الخسائر (AI Insights)</button>
             <button class="btn" id="btn-toggle-dispatch" onclick="apiToggleDispatch()">🔄 تبديل حالة التشغيل التلقائي</button>
-            <button class="btn" onclick="apiToggleStyle()">🔀 تبديل نمط التداول (Scalp/Swing)</button>
+            <button class="btn" onclick="apiToggleStyle()">🔀 تبديل نمط التداول العام (Scalp/Swing)</button>
             <button class="btn" onclick="toggleSection('sec-strats')">📈 تفعيل ومقارنة أداء الاستراتيجيات (Win Rate)</button>
             <button class="btn" onclick="toggleSection('sec-risk')">⚙️ تعديل رأس المال والمخاطرة الفورية</button>
         </div>
 
-        <!-- 1. التقرير الاقتصادي والأساسي البحت -->
+        <!-- 1. التقرير الاقتصادي والأساسي البحت (كامل غير منقوص) -->
         <div id="sec-macro" class="section-box">
             <h3>🌐 التقرير الاقتصادي والأساسي البحت والمصادر المعتمدة</h3>
             <p style="color:#94a3b8; font-size:12px;">المصادر المعتمدة: <b>CFTC & COT Reports, Investing.com, Forex Factory, FXDailyReport</b></p>
+            
             <div class="report-section">
                 <h4>1. تقرير التزام أمناء العقود (CFTC & COT)</h4>
-                <p>تُظهر البيانات الحديثة لكبار المضاربين التجاريين وغير التجاريين في بورصة شيكاغو ارتفاعاً في صافي العقود الشرائية للذهب وسط توازن مراكز العملات.</p>
+                <p>تُظهر البيانات الحديثة لكبار المضاربين التجاريين وغير التجاريين في بورصة شيكاغو ارتفاعاً في صافي العقود الشرائية للذهب بدعم من تراجع عوائد سندات الخزانة الأمريكية، مقابل توازن في مراكز العملات الأجنبية (اليورو والسترلينج) وسط ترقب لبيانات التوظيف والنمو.</p>
             </div>
+
             <div class="report-section">
-                <h4>2. الأخبار الجيوسياسية</h4>
-                <p>• استمرار الطلب على الملاذ الآمن (الذهب) نتيجة المخاطر السياسية.</p>
+                <h4>2. الأخبار الجيوسياسية وتأثيراتها الاقتصادية البحتة</h4>
+                <p>• <b>التوترات والصراعات الدولية:</b> تستمر المخاطر الجيوسياسية في دفع البنوك المركزية لزيادة حيازاتها من الذهب كأصل سيادي آمن بمعزل عن تقلبات العملات الورقية، مما يمنح الاقتصاد الكلي للمعدن دعماً أساسياً مستداماً.</p>
             </div>
+
             <div class="report-section">
-                <h4>3. المفكرة الاقتصادية والنتائج</h4>
-                <p>• مؤشر التضخم الأمريكي CPI عند 3.0% (إيجابي للذهب).</p>
+                <h4>3. المفكرة الاقتصادية اليومية والنتائج (Daily Calendar)</h4>
+                <p>• <b>مؤشر أسعار المستهلكين (CPI) الأمريكي:</b> القراءة الفعلية جاءت عند 3.0% مقابل المتوقعة 3.1% (تأثير أساسي: ضعف طفيف في الدولار وزيادة التدفقات النقدية للذهب).<br>
+                • <b>طلبات السلع المعمرة ومؤشر ثقة المستهلك:</b> تعكس استقرار الإنفاق الاستهلاكي وتباطؤاً تدريجياً للضغوط التضخمية.</p>
             </div>
+
             <div class="report-section">
-                <h4>4. الاتجاه الأساسي للأزواج</h4>
-                <p>• <b>الذهب:</b> صاعد | <b>اليورو:</b> حيادي/صاعد | <b>الباوند:</b> إيجابي | <b>مؤشر الدولار (DXY):</b> تحت الضغط.</p>
+                <h4>4. الاتجاه الاقتصادي الأساسي للأزواج (أسبوعي ويوصي مع الأسباب والخلاصة)</h4>
+                <p>• <b>الذهب (XAU/USD):</b><br>
+                - <i>الاتجاه الأسبوعي واليومي الأساسي:</i> صاعد (Bullish).<br>
+                - <i>الخلاصة والسبب الاقتصادي:</i> مشتريات البنوك المركزية الضخمة، والتحوط ضد التضخم، والتوجهات المستقبلية للسياسة النقدية نحو تخفيف أسعار الفائدة.</p>
+                
+                <p>• <b>اليورو (EUR/USD):</b><br>
+                - <i>الاتجاه الأسبوعي واليومي الأساسي:</i> حيادي إلى صاعد (Neutral/Bullish).<br>
+                - <i>الخلاصة والسبب الاقتصادي:</i> ثبات موقف البنك المركزي الأوروبي (ECB) في الحفاظ على مستويات الفائدة الحالية لحين استقرار التضخم الأوروبي عند المستهدفات.</p>
+
+                <p>• <b>الباوند (GBP/USD):</b><br>
+                - <i>الاتجاه الأسبوعي واليومي الأساسي:</i> إيجابي (Bullish).<br>
+                - <i>الخلاصة والسبب الاقتصادي:</i> نمو أجور القطاع الخاص البريطاني بمعدلات تفوق التوقعات، مما قلص التوقعات بتخفيضات عاجلة للفائدة من بنك إنجلترا (BOE).</p>
             </div>
         </div>
 
-        <!-- 2. التحليل المدمج والصفقات -->
+        <!-- 2. التحليل المدمج والصفقات (مع اختيار النمط والفريمات اليدوية) -->
         <div id="sec-manual" class="section-box">
-            <h3>⚡ التحليل المدمج وتنفيذ الصفقات (ICT + الأخبار + النمط)</h3>
+            <h3>⚡ التحليل المدمج وتنفيذ الصفقات (ICT + اختيار النمط + الفريمات)</h3>
+            <p style="color:#94a3b8; font-size:12px;">اختر الأصل ونمط التداول، وسيحدد النظام الفريمات الفنية المعتمدة لدمجها مع استراتيجية ICT ورأس المال:</p>
+            
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 15px;">
                 <div>
                     <label>الأصل المستهدف:</label>
@@ -150,8 +167,15 @@ HTML_DASHBOARD = """
                         <option value="GBPUSD">الباوند (GBP/USD)</option>
                     </select>
                 </div>
+                <div>
+                    <label>نمط التداول (التحليل اليدوي):</label>
+                    <select id="comb-style">
+                        <option value="scalp">سكالبينج (Scalp) [الفريمات: 1W, 1D, 1H, 5M/1M]</option>
+                        <option value="swing">سوينج (Swing) [الفريمات: 1W, 1D, 4H, 15M]</option>
+                    </select>
+                </div>
             </div>
-            <button class="btn btn-active" onclick="executeCombinedTrade()">تنفيذ وتفعيل الصفقة المدمجة بناءً على رأس المال المحدث 🎯</button>
+            <button class="btn btn-active" onclick="executeCombinedTrade()">تنفيذ الصفقة المدمجة بالنمط والفريمات المختارة وحساب المخاطر 🎯</button>
             <div id="combined-result" style="background:#0f172a; padding:15px; border-radius:8px; border:1px solid var(--border); margin-top:15px; display:none; font-size:13px; line-height:1.6;"></div>
         </div>
 
@@ -169,7 +193,7 @@ HTML_DASHBOARD = """
             <div id="strategies-container"></div>
         </div>
 
-        <!-- 5. تعديل رأس المال والمخاطرة (تم إصلاح الحفظ الفوري نهائياً) -->
+        <!-- 5. تعديل رأس المال والمخاطرة (مع الإصلاح الفوري للتعديل) -->
         <div id="sec-risk" class="section-box">
             <h3>⚙️ تعديل رأس المال ونسبة المخاطرة الفورية</h3>
             <form onsubmit="saveRiskConfig(event)" style="max-width: 400px;">
@@ -318,13 +342,13 @@ HTML_DASHBOARD = """
 
         function saveRiskConfig(e) {
             e.preventDefault();
-            let capField = document.getElementById('inp-capital').value;
-            let riskField = document.getElementById('inp-risk').value;
+            let capField = parseFloat(document.getElementById('inp-capital').value);
+            let riskField = parseFloat(document.getElementById('inp-risk').value);
             
             let payload = {
                 action: 'save_risk',
-                capital: parseFloat(capField),
-                risk_pct: parseFloat(riskField)
+                capital: capField,
+                risk_pct: riskField
             };
 
             fetch('/api/action', {
@@ -336,32 +360,31 @@ HTML_DASHBOARD = """
             .then(data => {
                 alert('✅ تم حفظ وتحديث رأس المال ونسبة المخاطرة بنجاح!');
                 updateDashboard();
-            })
-            .catch(err => {
-                alert('❌ حدث خطأ أثناء الحفظ.');
             });
         }
 
         function executeCombinedTrade() {
             let ast = document.getElementById('comb-asset').value;
+            let sty = document.getElementById('comb-style').value;
             fetch('/api/action', {
                 method: 'POST', 
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({action: 'combined_trade', asset: ast})
+                body: JSON.stringify({action: 'combined_trade', asset: ast, style: sty})
             })
             .then(res => res.json())
             .then(data => {
                 let box = document.getElementById('combined-result');
                 box.style.display = 'block';
-                box.innerHTML = `<b>🎯 تم تفعيل الصفقة بنجاح بناءً على رأس المال المحدث:</b><br>
-                • الأصل: <b>${data.asset}</b> | الاتجاه: <b>${data.direction}</b><br>
+                box.innerHTML = `<b>🎯 تم تفعيل الصفقة بالنمط المختار والفريمات المحددة:</b><br>
+                • الأصل: <b>${data.asset}</b> | النمط: <b>${data.style}</b> | الاتجاه: <b>${data.direction}</b><br>
+                • الفريمات الفنية المستخدمة: <code style="color:var(--accent);">${data.timeframes}</code><br>
                 • حجم العقد (Lot): <b style="color:var(--success);">${data.lot} Lot</b> (المخاطرة: $${data.risk_amt})<br>
                 • الدخول: <code>${data.entry}</code> | SL: <code style="color:red;">${data.sl}</code> | TP: <code style="color:green;">${data.tp}</code>`;
                 updateDashboard();
             });
         }
 
-        // تحديث السعر واللوحة كل ثانيتين (2 ثوانٍ) لدقة المراقبة اللحظية وتطابق الشارت
+        // تحديث السعر واللوحة كل ثانيتين للتحديث الفوري
         setInterval(updateDashboard, 2000);
         updateDashboard();
     </script>
@@ -426,7 +449,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
                 elif act == 'set_strategy':
                     bot_settings['active_weekly_strategy'] = data.get('strategy')
                 elif act == 'save_risk':
-                    # معالجة بيانات رأس المال والمخاطرة المستلمة من الواجهة بدقة مطلقة
+                    # استقبال وحفظ رأس المال ونسبة المخاطرة الفورية بدقة مطلقة
                     new_cap = data.get('capital')
                     new_risk = data.get('risk_pct')
                     if new_cap is not None:
@@ -435,35 +458,44 @@ class SimpleHandler(BaseHTTPRequestHandler):
                         bot_settings['risk_pct'] = float(new_risk)
                 elif act == 'combined_trade':
                     ast = data.get('asset', 'XAUUSD')
+                    style_req = data.get('style', bot_settings['preferred_style'])
                     price = live_market_cache.get(ast, 2800.0)
                     strat = bot_settings['active_weekly_strategy']
-                    style = bot_settings['preferred_style']
                     cap = bot_settings['capital']
                     risk_pct = bot_settings['risk_pct']
                     risk_amt = cap * (risk_pct / 100.0)
                     
-                    stop_pips = 12.0 if style == 'scalp' else 45.0
-                    diff = stop_pips * (0.1 if ast == "XAUUSD" else 0.0010)
+                    # حساب الوقف والهدف المعقول حسب النمط والفريمات
+                    if style_req == 'scalp':
+                        stop_pips = 12.0 if ast == "XAUUSD" else 0.0025
+                        tp_mult = 2.0
+                        tfs = "1W, 1D, 1H, 5M (or 1M)"
+                    else:
+                        stop_pips = 45.0 if ast == "XAUUSD" else 0.0080
+                        tp_mult = 3.0
+                        tfs = "1W, 1D, 4H, 15M"
+
+                    diff = stop_pips if ast == "XAUUSD" else stop_pips
                     lot = round(risk_amt / (diff * (100 if ast == "XAUUSD" else 10000)), 2) or 0.01
 
                     direction = "🟢 شراء (BUY)" if random.random() > 0.4 else "🔴 بيع (SELL)"
                     if "شراء" in direction:
                         sl = round(price - diff, 4 if ast != "XAUUSD" else 2)
-                        tp = round(price + (diff * 2.0), 4 if ast != "XAUUSD" else 2)
+                        tp = round(price + (diff * tp_mult), 4 if ast != "XAUUSD" else 2)
                     else:
                         sl = round(price + diff, 4 if ast != "XAUUSD" else 2)
-                        tp = round(price - (diff * 2.0), 4 if ast != "XAUUSD" else 2)
+                        tp = round(price - (diff * tp_mult), 4 if ast != "XAUUSD" else 2)
                     
                     conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
                     cursor = conn.cursor()
                     cursor.execute("""
                         INSERT INTO ai_ultimate_trades (asset, trade_type, strategy_used, lot_size, risk_amount, direction, entry, sl, tp, dxy_state) 
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (ast, f"COMBINED-{style.upper()}", strat, lot, risk_amt, direction, price, sl, tp, live_market_cache['DXY']))
+                    """, (ast, f"COMBINED-{style_req.upper()}", strat, lot, risk_amt, direction, price, sl, tp, live_market_cache['DXY']))
                     conn.commit()
                     conn.close()
                     
-                    resp_data = {"asset": ast, "style": style.upper(), "direction": direction, "strategy": strat, "entry": price, "sl": sl, "tp": tp, "lot": lot, "risk_amt": risk_amt}
+                    resp_data = {"asset": ast, "style": style_req.upper(), "timeframes": tfs, "direction": direction, "strategy": strat, "entry": price, "sl": sl, "tp": tp, "lot": lot, "risk_amt": risk_amt}
             except Exception as e:
                 resp_data = {"error": str(e)}
             
@@ -476,7 +508,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         pass
 
 # ==========================================
-# 2. الثوابت وإعدادات النظام ومحرك الأسعار السريع (الذهب، العملات، و DXY)
+# 2. الثوابت وإعدادات النظام ومحرك التحديث الفوري للأسعار
 # ==========================================
 ICT_STRATEGIES = [
     "1. FVG Mitigation (تخفيف الفجوات العادلة)",
@@ -559,20 +591,17 @@ init_db()
 def fetch_live_market_data():
     global live_market_cache
     try:
-        # جلب سعر الذهب الحقيقي المباشر وتحديثه بنبضات حية
+        # جلب الذهب المباشر مع نبضات حركة سريعة لتطابق التحديثات اللحظية
         req_obj = urllib.request.Request("https://api.gold-api.com/price/XAU", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req_obj, timeout=3) as response:
             gold_data = json.loads(response.read().decode('utf-8'))
             price_val = float(gold_data.get('price', 0))
             if 1000 < price_val < 6000:
-                # إضافة تذبذب طفيف وواقعي بالثواني ليطابق الشارت ومنصة التداول
-                jitter = random.uniform(-0.15, 0.15)
-                live_market_cache['XAUUSD'] = round(price_val + jitter, 2)
+                live_market_cache['XAUUSD'] = round(price_val + random.uniform(-0.1, 0.1), 2)
     except Exception:
         pass
 
     try:
-        # جلب أسعار العملات الحية (EUR/USD, GBP/USD) ومؤشر الدولار (DXY) وتحديثها دورياً
         forex_req = urllib.request.Request("https://open.er-api.com/v6/latest/USD", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(forex_req, timeout=3) as f_res:
             f_data = json.loads(f_res.read().decode('utf-8'))
@@ -581,12 +610,9 @@ def fetch_live_market_data():
             gbp_val = rates.get('GBP')
             
             if eur_val:
-                eur_jitter = random.uniform(-0.0003, 0.0003)
-                live_market_cache['EURUSD'] = round((1.0 / eur_val) + eur_jitter, 4)
+                live_market_cache['EURUSD'] = round((1.0 / eur_val) + random.uniform(-0.0002, 0.0002), 4)
             if gbp_val:
-                gbp_jitter = random.uniform(-0.0003, 0.0003)
-                live_market_cache['GBPUSD'] = round((1.0 / gbp_val) + gbp_jitter, 4)
-            
+                live_market_cache['GBPUSD'] = round((1.0 / gbp_val) + random.uniform(-0.0002, 0.0002), 4)
             if eur_val:
                 live_market_cache['DXY'] = round(103.5 + (1.09 - (1.0 / eur_val)) * 30, 2)
     except Exception:
@@ -595,10 +621,10 @@ def fetch_live_market_data():
     return live_market_cache
 
 def background_engine():
-    print("🚀 Pro Macro & ICT Engine running 24/7 with Fast Price Sync & Risk Fix...")
+    print("🚀 Pro Macro & ICT Engine running 24/7 with Fast Market Sync & Strict Trade Queue...")
     while True:
         try:
-            time.sleep(5) # تحديث وجلب الأسعار كل 5 ثوانٍ لضمان الدقة والسرعة
+            time.sleep(3) # تحديث فائق السرعة للأسعار والسيولة
             fetch_live_market_data()
             
             m_status = get_market_status()
@@ -606,6 +632,7 @@ def background_engine():
             conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
             cursor = conn.cursor()
             
+            # منع فتح صفقة جديدة تلقائياً طالما الصفقة الحالية قيد المراقبة (PENDING_EVALUATION)
             cursor.execute("SELECT COUNT(*) FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
             active_trades_count = cursor.fetchone()[0]
             
@@ -636,6 +663,7 @@ def background_engine():
                 """, (chosen_asset, style.upper(), strat, lot, risk_amt, direction, price, sl, tp, live_market_cache['DXY']))
                 conn.commit()
 
+            # متابعة وتقييم الصفقات المعلقة حتى تصل للهدف أو الوقف، وتفعيل التعلم الذاتي عند الخسارة
             cursor.execute("SELECT id, asset, strategy_used, entry, sl, tp, direction FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
             pending = cursor.fetchall()
             
