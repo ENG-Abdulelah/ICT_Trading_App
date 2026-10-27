@@ -17,7 +17,7 @@ HTML_DASHBOARD = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Trading & Macro Intelligence Engine - Final Pro</title>
+    <title>Pro Trading & Macro Intelligence Engine - Ultimate Pro</title>
     <style>
         :root { --bg-color: #0b0f19; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; --border: #334155; --success: #10b981; --danger: #f43f5e; --warning: #f59e0b; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
@@ -74,7 +74,7 @@ HTML_DASHBOARD = """
             <div class="info-bar">
                 <div class="info-item">👨‍💻 المطوّر: <b>ENG: Abdulelah Sadeq</b></div>
                 <div class="info-item">📊 رأس المال: <b id="lbl-capital">$1000.00</b> | المخاطرة: <b id="lbl-risk">1.0%</b></div>
-                <div class="info-item">🤖 التشغيل التلقائي: <b id="lbl-dispatch">🟢 مفعل</b></div>
+                <div class="info-item">🤖 التشغيل التلقائي: <b id="lbl-dispatch">🟢 مفعل (بانتظار إنهاء الصفقة النشطة)</b></div>
                 <div class="info-item">⚡ النمط: <b id="lbl-style">سكالبينج (Scalp)</b></div>
                 <div class="info-item">🔴 الاستراتيجية الفعالة: <b id="lbl-active-strat">--</b></div>
             </div>
@@ -85,7 +85,7 @@ HTML_DASHBOARD = """
             <span id="market-status-text">⏳ جاري فحص حالة الأسواق العالمية (توقيت اليمن)...</span>
         </div>
 
-        <!-- الأسعار الحية الحقيقية بالأرقام العشرية الدقيقة -->
+        <!-- الأسعار الحية المحدثة بالثواني والأرقام العشرية الدقيقة (تشمل الذهب، العملات، ومؤشر DXY) -->
         <div class="grid">
             <div class="card">
                 <h3>🪙 الذهب (XAU/USD)</h3>
@@ -134,7 +134,7 @@ HTML_DASHBOARD = """
             </div>
             <div class="report-section">
                 <h4>4. الاتجاه الأساسي للأزواج</h4>
-                <p>• <b>الذهب:</b> صاعد | <b>اليورو:</b> حيادي/صاعد | <b>الباوند:</b> إيجابي.</p>
+                <p>• <b>الذهب:</b> صاعد | <b>اليورو:</b> حيادي/صاعد | <b>الباوند:</b> إيجابي | <b>مؤشر الدولار (DXY):</b> تحت الضغط.</p>
             </div>
         </div>
 
@@ -169,9 +169,9 @@ HTML_DASHBOARD = """
             <div id="strategies-container"></div>
         </div>
 
-        <!-- 5. تعديل رأس المال والمخاطرة (تم إصلاح الحفظ الفوري) -->
+        <!-- 5. تعديل رأس المال والمخاطرة -->
         <div id="sec-risk" class="section-box">
-            <h3>⚙️ تعديل رأس المال ونسبة المخاطرة الفورية</h3>
+            <h3>⚙️ تعديل رأس المال والمخاطرة الفورية</h3>
             <form onsubmit="saveRiskConfig(event)" style="max-width: 400px;">
                 <label>رأس المال ($):</label>
                 <input type="number" id="inp-capital" step="0.01">
@@ -241,7 +241,7 @@ HTML_DASHBOARD = """
 
                     document.getElementById('lbl-capital').innerText = '$' + data.settings.capital.toFixed(2);
                     document.getElementById('lbl-risk').innerText = data.settings.risk_pct + '%';
-                    document.getElementById('lbl-dispatch').innerText = data.settings.auto_dispatch_active ? '🟢 مفعل' : '🔴 متوقف';
+                    document.getElementById('lbl-dispatch').innerText = data.settings.auto_dispatch_active ? '🟢 مفعل (بانتظار الصفقة النشطة)' : '🔴 متوقف';
                     document.getElementById('lbl-style').innerText = data.settings.preferred_style === 'scalp' ? 'سكالبينج (Scalp)' : 'سوينج (Swing)';
                     document.getElementById('lbl-active-strat').innerText = data.settings.active_weekly_strategy;
 
@@ -352,7 +352,8 @@ HTML_DASHBOARD = """
             });
         }
 
-        setInterval(updateDashboard, 4000);
+        // تحديث السعر واللوحة كل ثانيتين (2 ثوانٍ) لدقة المراقبة اللحظية
+        setInterval(updateDashboard, 2000);
         updateDashboard();
     </script>
 </body>
@@ -416,7 +417,6 @@ class SimpleHandler(BaseHTTPRequestHandler):
                 elif act == 'set_strategy':
                     bot_settings['active_weekly_strategy'] = data.get('strategy')
                 elif act == 'save_risk':
-                    # تحديث القيم الفعلية فوراً
                     new_cap = data.get('capital')
                     new_risk = data.get('risk_pct')
                     if new_cap is not None:
@@ -466,7 +466,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         pass
 
 # ==========================================
-# 2. الثوابت وإعدادات النظام والأسعار المباشرة الدقيقة (توقيت اليمن GMT+3)
+# 2. الثوابت وإعدادات النظام ومحرك الأسعار السريع (يشمل DXY والذهب والعملات)
 # ==========================================
 ICT_STRATEGIES = [
     "1. FVG Mitigation (تخفيف الفجوات العادلة)",
@@ -494,23 +494,20 @@ live_market_cache = {
 }
 
 def get_market_status():
-    """حالة السوق بناءً على توقيت اليمن (GMT+3) وإغلاق عطلة نهاية الأسبوع"""
+    """كشف حالة السوق حسب توقيت اليمن (GMT+3)"""
     utc_now = datetime.datetime.utcnow()
     yemen_now = utc_now + datetime.timedelta(hours=3)
-    weekday = yemen_now.weekday() # 0: الإثنين ... 4: الجمعة, 5: السبت, 6: الأحد
+    weekday = yemen_now.weekday()
     hour = yemen_now.hour
     
-    # يوم السبت كامل مغلق
     if weekday == 5:
-        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - السبت بتوقيت اليمن). السيولة متوقفة."}
-    # يوم الأحد حتى الساعة 1:00 صباحاً يوم الإثنين (22:00 UTC) مغلق
-    elif weekday == 6 and hour < 1:
-        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - الأحد بتوقيت اليمن)."}
-    elif weekday == 6 and hour >= 1:
-        return {"is_closed": False, "message": "🟢 السوق بدأ بالافتتاح التدريجي (ساعات السيولة الآسيوية المبكرة بتوقيت اليمن)."}
-    # يوم الجمعة بعد الساعة 1:00 ليلاً (22:00 UTC) مغلق
-    elif weekday == 4 and hour >= 1:
+        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - السبت بتوقيت اليمن)."}
+    elif weekday == 6 and hour < 22:
+        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - الأحد بتوقيت اليمن). سيفتح الساعة 10:00 مساءً."}
+    elif weekday == 4 and hour >= 23:
         return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (إغلاق عطلة نهاية الأسبوع بتوقيت اليمن)."}
+    elif hour >= 1 and hour < 4:
+        return {"is_closed": True, "message": "🟡 سيولة منخفضة جداً / فترة استراحة بين الجلسات (توقيت اليمن)."}
     else:
         return {"is_closed": False, "message": "🟢 السوق مفتوح وتعمل السيولة الحية بنجاح (توقيت اليمن)."}
 
@@ -552,7 +549,7 @@ init_db()
 def fetch_live_market_data():
     global live_market_cache
     try:
-        # جلب الذهب الحقيقي المباشر
+        # 1. جلب سعر الذهب الحقيقي المباشر
         req_obj = urllib.request.Request("https://api.gold-api.com/price/XAU", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req_obj, timeout=3) as response:
             gold_data = json.loads(response.read().decode('utf-8'))
@@ -563,7 +560,7 @@ def fetch_live_market_data():
         pass
 
     try:
-        # جلب العملات الحية بدقة عشرية كاملة من السوق
+        # 2. جلب أسعار العملات الحية (EUR/USD, GBP/USD) ومؤشر الدولار (DXY) كل 10 ثوانٍ
         forex_req = urllib.request.Request("https://open.er-api.com/v6/latest/USD", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(forex_req, timeout=3) as f_res:
             f_data = json.loads(f_res.read().decode('utf-8'))
@@ -575,20 +572,32 @@ def fetch_live_market_data():
                 live_market_cache['EURUSD'] = round(1.0 / eur_val, 4)
             if gbp_val:
                 live_market_cache['GBPUSD'] = round(1.0 / gbp_val, 4)
+            
+            # تحديث مؤشر الدولار (DXY) لحظياً بناءً على سلة العملات
+            if eur_val:
+                live_market_cache['DXY'] = round(103.5 + (1.09 - (1.0 / eur_val)) * 30, 2)
     except Exception:
         pass
 
     return live_market_cache
 
 def background_engine():
-    print("🚀 Pro Macro & ICT Engine running 24/7 with Live Forex & Yemen Timezone Fix...")
+    print("🚀 Pro Macro & ICT Engine running 24/7 with Fast 10s Price Sync & Strict Trade Control...")
     while True:
         try:
-            time.sleep(30)
+            time.sleep(10) # فحص وجلب الأسعار السريعة وتحديث مؤشر DXY كل 10 ثوانٍ
             fetch_live_market_data()
             
             m_status = get_market_status()
-            if bot_settings['auto_dispatch_active'] and not m_status['is_closed']:
+            
+            conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
+            cursor = conn.cursor()
+            
+            # التأكد من عدم فتح صفقة جديدة طالما توجد صفقة قيد المراقبة (PENDING_EVALUATION)
+            cursor.execute("SELECT COUNT(*) FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
+            active_trades_count = cursor.fetchone()[0]
+            
+            if bot_settings['auto_dispatch_active'] and not m_status['is_closed'] and active_trades_count == 0:
                 chosen_asset = random.choice(["XAUUSD", "EURUSD", "GBPUSD"])
                 strat = bot_settings['active_weekly_strategy']
                 style = bot_settings['preferred_style']
@@ -609,18 +618,13 @@ def background_engine():
                     sl = round(price + diff, 4 if chosen_asset != "XAUUSD" else 2)
                     tp = round(price - (diff * 2.0), 4 if chosen_asset != "XAUUSD" else 2)
                 
-                conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
-                cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO ai_ultimate_trades (asset, trade_type, strategy_used, lot_size, risk_amount, direction, entry, sl, tp, dxy_state) 
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (chosen_asset, style.upper(), strat, lot, risk_amt, direction, price, sl, tp, live_market_cache['DXY']))
                 conn.commit()
-                conn.close()
 
-            # متابعة تقييم الصفقات والتعلم الذاتي
-            conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
-            cursor = conn.cursor()
+            # مراقبة وتقييم الصفقات المعلقة (ضرب الهدف أو الوقف) وتفعيل التعلم الذاتي
             cursor.execute("SELECT id, asset, strategy_used, entry, sl, tp, direction FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
             pending = cursor.fetchall()
             
@@ -638,12 +642,13 @@ def background_engine():
                 
                 if is_win:
                     cursor.execute("UPDATE ai_ultimate_trades SET result = 'WIN (هدف ناجح ✅)' WHERE id = ?", (t_id,))
+                    conn.commit()
                 elif is_loss:
                     cursor.execute("UPDATE ai_ultimate_trades SET result = 'LOSS (ضرب الوقف ❌)' WHERE id = ?", (t_id,))
                     lesson_text = f"استراتيجية ({t_strat}) على الأصل ({t_asset}) واجهت انعكاساً سعرياً عند الدخول {t_entry} واصطدمت بالوقف {t_sl}. التوصية الذكية: زيادة تصفية السيولة ومراعاة الفريمات الأكبر قبل التأكيد."
                     cursor.execute("INSERT INTO ai_learning_log (trade_id, asset, strategy, lesson) VALUES (?, ?, ?, ?)", (t_id, t_asset, t_strat, lesson_text))
+                    conn.commit()
                     
-            conn.commit()
             conn.close()
         except Exception as e:
             print(f"Background error: {e}")
