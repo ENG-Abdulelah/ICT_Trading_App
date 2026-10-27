@@ -17,7 +17,7 @@ HTML_DASHBOARD = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Trading & Macro Intelligence Engine - Live Fixed</title>
+    <title>Pro Trading & Macro Intelligence Engine - Final Pro</title>
     <style>
         :root { --bg-color: #0b0f19; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; --border: #334155; --success: #10b981; --danger: #f43f5e; --warning: #f59e0b; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
@@ -82,10 +82,10 @@ HTML_DASHBOARD = """
 
         <!-- شريط حالة السوق الحي -->
         <div id="market-banner" class="market-status-banner market-open">
-            <span id="market-status-text">⏳ جاري فحص حالة الأسواق العالمية...</span>
+            <span id="market-status-text">⏳ جاري فحص حالة الأسواق العالمية (توقيت اليمن)...</span>
         </div>
 
-        <!-- الأسعار المباشرة من السوق -->
+        <!-- الأسعار الحية الحقيقية بالأرقام العشرية الدقيقة -->
         <div class="grid">
             <div class="card">
                 <h3>🪙 الذهب (XAU/USD)</h3>
@@ -116,7 +116,7 @@ HTML_DASHBOARD = """
             <button class="btn" onclick="toggleSection('sec-risk')">⚙️ تعديل رأس المال والمخاطرة الفورية</button>
         </div>
 
-        <!-- 1. التقرير الاقتصادي -->
+        <!-- 1. التقرير الاقتصادي والأساسي البحت -->
         <div id="sec-macro" class="section-box">
             <h3>🌐 التقرير الاقتصادي والأساسي البحت والمصادر المعتمدة</h3>
             <p style="color:#94a3b8; font-size:12px;">المصادر المعتمدة: <b>CFTC & COT Reports, Investing.com, Forex Factory, FXDailyReport</b></p>
@@ -169,14 +169,14 @@ HTML_DASHBOARD = """
             <div id="strategies-container"></div>
         </div>
 
-        <!-- 5. تعديل رأس المال والمخاطرة (تم إصلاح المشكلة) -->
+        <!-- 5. تعديل رأس المال والمخاطرة (تم إصلاح الحفظ الفوري) -->
         <div id="sec-risk" class="section-box">
             <h3>⚙️ تعديل رأس المال ونسبة المخاطرة الفورية</h3>
             <form onsubmit="saveRiskConfig(event)" style="max-width: 400px;">
                 <label>رأس المال ($):</label>
-                <input type="number" id="inp-capital" step="10">
+                <input type="number" id="inp-capital" step="0.01">
                 <label style="margin-top:10px;">نسبة المخاطرة لكل صفقة (%):</label>
-                <input type="number" id="inp-risk" step="0.1">
+                <input type="number" id="inp-risk" step="0.01">
                 <button class="btn btn-active" style="width:100%; margin-top:15px;">حفظ التعديلات فوراً</button>
             </form>
         </div>
@@ -224,10 +224,10 @@ HTML_DASHBOARD = """
             fetch('/api/data')
                 .then(res => res.json())
                 .then(data => {
-                    document.getElementById('price-xau').innerText = data.prices.XAUUSD;
-                    document.getElementById('price-eur').innerText = data.prices.EURUSD;
-                    document.getElementById('price-gbp').innerText = data.prices.GBPUSD;
-                    document.getElementById('price-dxy').innerText = data.prices.DXY;
+                    document.getElementById('price-xau').innerText = data.prices.XAUUSD.toFixed(2);
+                    document.getElementById('price-eur').innerText = data.prices.EURUSD.toFixed(4);
+                    document.getElementById('price-gbp').innerText = data.prices.GBPUSD.toFixed(4);
+                    document.getElementById('price-dxy').innerText = data.prices.DXY.toFixed(2);
 
                     let banner = document.getElementById('market-banner');
                     let statusText = document.getElementById('market-status-text');
@@ -239,14 +239,18 @@ HTML_DASHBOARD = """
                         statusText.innerText = data.market_status.message;
                     }
 
-                    document.getElementById('lbl-capital').innerText = '$' + data.settings.capital;
+                    document.getElementById('lbl-capital').innerText = '$' + data.settings.capital.toFixed(2);
                     document.getElementById('lbl-risk').innerText = data.settings.risk_pct + '%';
                     document.getElementById('lbl-dispatch').innerText = data.settings.auto_dispatch_active ? '🟢 مفعل' : '🔴 متوقف';
                     document.getElementById('lbl-style').innerText = data.settings.preferred_style === 'scalp' ? 'سكالبينج (Scalp)' : 'سوينج (Swing)';
                     document.getElementById('lbl-active-strat').innerText = data.settings.active_weekly_strategy;
 
-                    document.getElementById('inp-capital').value = data.settings.capital;
-                    document.getElementById('inp-risk').value = data.settings.risk_pct;
+                    if(document.activeElement !== document.getElementById('inp-capital')) {
+                        document.getElementById('inp-capital').value = data.settings.capital;
+                    }
+                    if(document.activeElement !== document.getElementById('inp-risk')) {
+                        document.getElementById('inp-risk').value = data.settings.risk_pct;
+                    }
 
                     if(data.strats_performance) {
                         let html = '';
@@ -301,15 +305,15 @@ HTML_DASHBOARD = """
         }
 
         function apiToggleDispatch() {
-            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'toggle_dispatch'})}).then(() => updateDashboard());
+            fetch('/api/action', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'toggle_dispatch'})}).then(() => updateDashboard());
         }
 
         function apiToggleStyle() {
-            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'toggle_style'})}).then(() => updateDashboard());
+            fetch('/api/action', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'toggle_style'})}).then(() => updateDashboard());
         }
 
         function activateStrategy(stratName) {
-            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'set_strategy', strategy: stratName})}).then(() => updateDashboard());
+            fetch('/api/action', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'set_strategy', strategy: stratName})}).then(() => updateDashboard());
         }
 
         function saveRiskConfig(e) {
@@ -412,9 +416,13 @@ class SimpleHandler(BaseHTTPRequestHandler):
                 elif act == 'set_strategy':
                     bot_settings['active_weekly_strategy'] = data.get('strategy')
                 elif act == 'save_risk':
-                    # معالجة وحفظ تعديلات رأس المال والمخاطرة بدقة
-                    bot_settings['capital'] = float(data.get('capital', bot_settings['capital']))
-                    bot_settings['risk_pct'] = float(data.get('risk_pct', bot_settings['risk_pct']))
+                    # تحديث القيم الفعلية فوراً
+                    new_cap = data.get('capital')
+                    new_risk = data.get('risk_pct')
+                    if new_cap is not None:
+                        bot_settings['capital'] = float(new_cap)
+                    if new_risk is not None:
+                        bot_settings['risk_pct'] = float(new_risk)
                 elif act == 'combined_trade':
                     ast = data.get('asset', 'XAUUSD')
                     price = live_market_cache.get(ast, 2800.0)
@@ -458,7 +466,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         pass
 
 # ==========================================
-# 2. الثوابت وإعدادات النظام وجلب الأسعار المباشرة الدقيقة
+# 2. الثوابت وإعدادات النظام والأسعار المباشرة الدقيقة (توقيت اليمن GMT+3)
 # ==========================================
 ICT_STRATEGIES = [
     "1. FVG Mitigation (تخفيف الفجوات العادلة)",
@@ -486,19 +494,25 @@ live_market_cache = {
 }
 
 def get_market_status():
-    """كشف حالة السوق (مفتوح / استراحة نهاية الأسبوع)"""
-    now = datetime.datetime.utcnow()
-    weekday = now.weekday()
-    hour = now.hour
+    """حالة السوق بناءً على توقيت اليمن (GMT+3) وإغلاق عطلة نهاية الأسبوع"""
+    utc_now = datetime.datetime.utcnow()
+    yemen_now = utc_now + datetime.timedelta(hours=3)
+    weekday = yemen_now.weekday() # 0: الإثنين ... 4: الجمعة, 5: السبت, 6: الأحد
+    hour = yemen_now.hour
     
+    # يوم السبت كامل مغلق
     if weekday == 5:
-        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - السبت). الاستراحة مستمرة حتى الأحد 22:00 UTC."}
-    elif weekday == 6 and hour < 22:
-        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - الأحد). سيفتح اليوم الساعة 22:00 UTC."}
-    elif weekday == 4 and hour >= 22:
-        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - إغلاق الجمعة). الاستراحة سارية."}
+        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - السبت بتوقيت اليمن). السيولة متوقفة."}
+    # يوم الأحد حتى الساعة 1:00 صباحاً يوم الإثنين (22:00 UTC) مغلق
+    elif weekday == 6 and hour < 1:
+        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (عطلة نهاية الأسبوع - الأحد بتوقيت اليمن)."}
+    elif weekday == 6 and hour >= 1:
+        return {"is_closed": False, "message": "🟢 السوق بدأ بالافتتاح التدريجي (ساعات السيولة الآسيوية المبكرة بتوقيت اليمن)."}
+    # يوم الجمعة بعد الساعة 1:00 ليلاً (22:00 UTC) مغلق
+    elif weekday == 4 and hour >= 1:
+        return {"is_closed": True, "message": "🔴 السوق مغلق حالياً (إغلاق عطلة نهاية الأسبوع بتوقيت اليمن)."}
     else:
-        return {"is_closed": False, "message": "🟢 السوق مفتوح وتعمل السيولة الحية بنجاح."}
+        return {"is_closed": False, "message": "🟢 السوق مفتوح وتعمل السيولة الحية بنجاح (توقيت اليمن)."}
 
 def init_db():
     conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
@@ -538,7 +552,7 @@ init_db()
 def fetch_live_market_data():
     global live_market_cache
     try:
-        # جلب أسعار مباشرة ومحدثة للذهب والعملات من السوق
+        # جلب الذهب الحقيقي المباشر
         req_obj = urllib.request.Request("https://api.gold-api.com/price/XAU", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req_obj, timeout=3) as response:
             gold_data = json.loads(response.read().decode('utf-8'))
@@ -549,6 +563,7 @@ def fetch_live_market_data():
         pass
 
     try:
+        # جلب العملات الحية بدقة عشرية كاملة من السوق
         forex_req = urllib.request.Request("https://open.er-api.com/v6/latest/USD", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(forex_req, timeout=3) as f_res:
             f_data = json.loads(f_res.read().decode('utf-8'))
@@ -566,7 +581,7 @@ def fetch_live_market_data():
     return live_market_cache
 
 def background_engine():
-    print("🚀 Pro Macro & ICT Engine running 24/7 with Live Market Feeds & Risk Fix...")
+    print("🚀 Pro Macro & ICT Engine running 24/7 with Live Forex & Yemen Timezone Fix...")
     while True:
         try:
             time.sleep(30)
@@ -603,7 +618,7 @@ def background_engine():
                 conn.commit()
                 conn.close()
 
-            # تقييم ومراقبة الصفقات الحية واستنباط التعلم الذاتي
+            # متابعة تقييم الصفقات والتعلم الذاتي
             conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
             cursor = conn.cursor()
             cursor.execute("SELECT id, asset, strategy_used, entry, sl, tp, direction FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
