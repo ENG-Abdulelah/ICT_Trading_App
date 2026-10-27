@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 # ==========================================
-# 1. إعداد واجهة خادم الويب (Hugging Face Web App)
+# 1. واجهة الويب الاحترافية المتكاملة (Web App UI)
 # ==========================================
 HTML_DASHBOARD = """
 <!DOCTYPE html>
@@ -17,66 +17,107 @@ HTML_DASHBOARD = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate ICT & Macro 7-Strategies Trading Dashboard</title>
+    <title>Ultimate ICT & Macro Trading Engine - Pro</title>
     <style>
-        :root { --bg-color: #0f172a; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; }
+        :root { --bg-color: #0b0f19; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; --border: #334155; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #334155; padding-bottom: 15px; margin-bottom: 25px; flex-wrap: wrap; gap: 10px; }
-        h1 { margin: 0; font-size: 22px; color: var(--accent); }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-bottom: 25px; }
-        .card { background-color: var(--card-bg); border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #334155; }
-        .card h3 { margin-top: 0; color: #94a3b8; font-size: 16px; border-bottom: 1px solid #334155; padding-bottom: 8px; }
-        .price { font-size: 26px; font-weight: bold; margin: 10px 0; color: #34d399; }
+        .container { max-width: 1300px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 15px; margin-bottom: 25px; flex-wrap: wrap; gap: 10px; }
+        h1 { margin: 0; font-size: 24px; color: var(--accent); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 25px; }
+        .card { background-color: var(--card-bg); border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.4); border: 1px solid var(--border); }
+        .card h3 { margin-top: 0; color: #94a3b8; font-size: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        .price { font-size: 28px; font-weight: bold; margin: 10px 0; color: #34d399; }
+        .badge { background: #0284c7; color: white; padding: 4px 10px; border-radius: 6px; font-size: 12px; }
+        .strategy-badge { background: #7c3aed; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; display: inline-block; margin-top: 8px; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 10px; text-align: right; border-bottom: 1px solid #334155; font-size: 13px; }
-        th { color: #94a3b8; }
-        .badge { background: #0284c7; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
-        .strategy-badge { background: #7c3aed; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: inline-block; margin-top: 5px; line-height: 1.4; }
+        th, td { padding: 12px; text-align: right; border-bottom: 1px solid var(--border); font-size: 13px; }
+        th { color: #94a3b8; background: #111827; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; color: #94a3b8; font-size: 14px; }
+        input, select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #0f172a; color: white; font-size: 14px; box-sizing: border-box; }
+        button { background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
+        button:hover { background: #1d4ed8; }
+        .news-box { background: #111827; padding: 15px; border-radius: 8px; border-right: 4px solid #38bdf8; margin-bottom: 10px; font-size: 13px; line-height: 1.6; }
         .footer { text-align: center; margin-top: 40px; color: #64748b; font-size: 13px; }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>⚡ Ultimate ICT & Macro 7-Strategies Engine</h1>
-            <div><span class="badge">Engine: Active</span> | <span class="badge" style="background:#10b981;">Hugging Face Cloud</span></div>
+            <h1>⚡ Ultimate ICT & Macro Analysis Engine</h1>
+            <div><span class="badge">Render Cloud: Active 24/7</span> | <span class="badge" style="background:#10b981;">Market: Live</span></div>
         </header>
 
+        <!-- أسعار الأسواق الحية والتحليلات -->
         <div class="grid">
             <div class="card">
                 <h3>🪙 الذهب (XAU/USD)</h3>
                 <div class="price" id="price-xau">--</div>
-                <div id="strat-xau"><span class="strategy-badge">جاري تحليل مدرسة ICT...</span></div>
+                <div id="strat-xau"><span class="strategy-badge">جاري تحليل ICT...</span></div>
             </div>
             <div class="card">
                 <h3>💶 اليورو (EUR/USD)</h3>
                 <div class="price" id="price-eur">--</div>
-                <div id="strat-eur"><span class="strategy-badge">جاري تحليل مدرسة ICT...</span></div>
+                <div id="strat-eur"><span class="strategy-badge">جاري تحليل ICT...</span></div>
             </div>
             <div class="card">
                 <h3>💷 الباوند (GBP/USD)</h3>
                 <div class="price" id="price-gbp">--</div>
-                <div id="strat-gbp"><span class="strategy-badge">جاري تحليل مدرسة ICT...</span></div>
+                <div id="strat-gbp"><span class="strategy-badge">جاري تحليل ICT...</span></div>
             </div>
             <div class="card">
                 <h3>💵 مؤشر الدولار (DXY)</h3>
                 <div class="price" id="price-dxy" style="color:#f43f5e;">--</div>
-                <p>الحالة: ضغط مؤسسي هيكلي</p>
+                <p>الحالة الهيكلية: ضغط مؤسسي وسيولة عليا</p>
             </div>
         </div>
 
+        <!-- لوحة التحكم وحاسبة المخاطر -->
+        <div class="grid" style="grid-template-columns: 1fr 2fr;">
+            <div class="card">
+                <h3>⚙️ إعدادات رأس المال والمخاطر</h3>
+                <form id="settings-form" onsubmit="updateSettings(event)">
+                    <div class="form-group">
+                        <label>رأس المال ($):</label>
+                        <input type="number" id="capital" value="1000" step="10">
+                    </div>
+                    <div class="form-group">
+                        <label>نسبة المخاطرة (%):</label>
+                        <input type="number" id="risk_pct" value="1.0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>نوع التداول:</label>
+                        <select id="preferred_style">
+                            <option value="scalp">سكالبينج (Scalping - 1H/5M)</option>
+                            <option value="swing">سوينج (Swing - 4H/15M)</option>
+                        </select>
+                    </div>
+                    <button type="submit" style="width:100%;">حفظ وتحديث الإعدادات</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>🌐 الأخبار الاقتصادية والجيوسياسية الفورية (Macro Feed)</h3>
+                <div id="news-container">
+                    <div class="news-box"><b>مؤشر أسعار المستهلكين (CPI):</b> جاري جلب التحليل الفوري وتأثيره على الذهب والعملات...</div>
+                    <div class="news-box"><b>قرارات الفيدرالي وسيولة DXY:</b> جاري تقييم مناطق الفجوات العادلة (FVG) وبنية السوق...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- جدول الصفقات والسجل الذكي -->
         <div class="card">
-            <h3>📊 سجل الصفقات الذكية وتطبيقات استراتيجيات ICT الـ 7 (Live Trade Journal)</h3>
+            <h3>📊 سجل الصفقات الذكية وتطبيقات استراتيجيات ICT الـ 7</h3>
             <div style="overflow-x: auto;">
                 <table>
                     <thead>
                         <tr>
                             <th>#ID</th>
                             <th>الأصل</th>
-                            <th>نوع الصفقة</th>
-                            <th>استراتيجية ICT المستخدمة</th>
-                            <th>العقد</th>
+                            <th>النمط</th>
+                            <th>استراتيجية ICT</th>
+                            <th>العقد (Lot)</th>
                             <th>الدخول</th>
                             <th>الوقف (SL)</th>
                             <th>الهدف (TP)</th>
@@ -84,14 +125,14 @@ HTML_DASHBOARD = """
                         </tr>
                     </thead>
                     <tbody id="trades-table">
-                        <tr><td colspan="9" style="text-align:center;">جاري تحميل سجلات الصفقات والتحليلات...</td></tr>
+                        <tr><td colspan="9" style="text-align:center;">جاري تحميل سجلات الصفقات...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
         
         <div class="footer">
-            تم التطوير بواسطة عبد الإله صادق | محطة التحليل المالي والتقني الذكية
+            تم التطوير بواسطة عبد الإله صادق | محطة التداول والتحليل الذكي المتكاملة
         </div>
     </div>
 
@@ -105,6 +146,12 @@ HTML_DASHBOARD = """
                     document.getElementById('price-gbp').innerText = data.prices.GBPUSD;
                     document.getElementById('price-dxy').innerText = data.prices.DXY;
                     
+                    if(data.settings) {
+                        document.getElementById('capital').value = data.settings.capital;
+                        document.getElementById('risk_pct').value = data.settings.risk_pct;
+                        document.getElementById('preferred_style').value = data.settings.preferred_style;
+                    }
+
                     if(data.latest_strats) {
                         if(data.latest_strats.XAUUSD) document.getElementById('strat-xau').innerHTML = `<span class="strategy-badge">${data.latest_strats.XAUUSD}</span>`;
                         if(data.latest_strats.EURUSD) document.getElementById('strat-eur').innerHTML = `<span class="strategy-badge">${data.latest_strats.EURUSD}</span>`;
@@ -131,6 +178,22 @@ HTML_DASHBOARD = """
                     }
                 });
         }
+
+        function updateSettings(e) {
+            e.preventDefault();
+            let cap = document.getElementById('capital').value;
+            let risk = document.getElementById('risk_pct').value;
+            let style = document.getElementById('preferred_style').value;
+
+            fetch('/api/settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({capital: cap, risk_pct: risk, preferred_style: style})
+            }).then(res => res.json()).then(resp => {
+                alert('✅ تم تحديث إعدادات المخاطر ورأس المال بنجاح!');
+            });
+        }
+
         setInterval(updateDashboard, 5000);
         updateDashboard();
     </script>
@@ -168,21 +231,37 @@ class SimpleHandler(BaseHTTPRequestHandler):
             payload = {
                 "prices": live_market_cache,
                 "trades": trades,
-                "latest_strats": latest_strats
+                "latest_strats": latest_strats,
+                "settings": bot_settings
             }
             self.wfile.write(json.dumps(payload).encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        if self.path == '/api/settings':
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                bot_settings['capital'] = float(data.get('capital', 1000))
+                bot_settings['risk_pct'] = float(data.get('risk_pct', 1.0))
+                bot_settings['preferred_style'] = data.get('preferred_style', 'scalp')
+            except Exception:
+                pass
+            
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+
     def log_message(self, format, *args):
         pass
 
 def run_web_server():
-    # Hugging Face Spaces تستخدم عادة البورت 7860 افتراضياً لتطبيقات الويب
-    port = int(os.environ.get("PORT", 7860))
+    port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHandler)
-    print(f"🚀 Server running on port {port}")
     server.serve_forever()
 
 threading.Thread(target=run_web_server, daemon=True).start()
@@ -244,7 +323,7 @@ def init_db():
 init_db()
 
 # ==========================================
-# 4. محرك جلب الأسعار والتحليل الخلفي 24/7
+# 4. محرك التحليل والأسواق والذكاء 24/7
 # ==========================================
 def fetch_live_market_data():
     global live_market_cache
@@ -261,7 +340,7 @@ def fetch_live_market_data():
     return live_market_cache
 
 def background_engine():
-    print("🚀 Background 7-Strategies ICT Engine running successfully...")
+    print("🚀 Pro Macro & ICT 7-Strategies Engine running 24/7...")
     while True:
         try:
             time.sleep(45)
@@ -277,28 +356,33 @@ def background_engine():
                 capital = bot_settings['capital']
                 risk_pct = bot_settings['risk_pct']
                 risk_amt = capital * (risk_pct / 100.0)
-                lot_size = round(risk_amt / (bot_settings['stop_pips'] * 10), 2)
+                
+                # حساب حجم العقد بناءً على النمط (سكالبينج أهداف قريبة / سوينج أهداف واسعة)
+                stop_pips = 10.0 if style == 'scalp' else 35.0
+                lot_size = round(risk_amt / (stop_pips * 10), 2)
                 if lot_size < 0.01:
                     lot_size = 0.01
                     
                 direction = "🟢 شراء (BUY - إشارة سيولة مؤسسية)" if random.random() > 0.5 else "🔴 بيع (SELL - ضغط بيعي مؤسسي)"
                 
+                multiplier = 1.0 if style == 'scalp' else 3.0
                 if "شراء" in direction:
-                    sl_val = round(price - 3.0 if chosen_asset == "XAUUSD" else price - 0.0025, 4 if chosen_asset != "XAUUSD" else 2)
-                    tp_val = round(price + 6.5 if chosen_asset == "XAUUSD" else price + 0.0050, 4 if chosen_asset != "XAUUSD" else 2)
+                    sl_val = round(price - (2.5 * multiplier) if chosen_asset == "XAUUSD" else price - (0.0020 * multiplier), 4 if chosen_asset != "XAUUSD" else 2)
+                    tp_val = round(price + (5.0 * multiplier) if chosen_asset == "XAUUSD" else price + (0.0040 * multiplier), 4 if chosen_asset != "XAUUSD" else 2)
                 else:
-                    sl_val = round(price + 3.0 if chosen_asset == "XAUUSD" else price + 0.0025, 4 if chosen_asset != "XAUUSD" else 2)
-                    tp_val = round(price - 6.5 if chosen_asset == "XAUUSD" else price - 0.0050, 4 if chosen_asset != "XAUUSD" else 2)
+                    sl_val = round(price + (2.5 * multiplier) if chosen_asset == "XAUUSD" else price + (0.0020 * multiplier), 4 if chosen_asset != "XAUUSD" else 2)
+                    tp_val = round(price - (5.0 * multiplier) if chosen_asset == "XAUUSD" else price - (0.0040 * multiplier), 4 if chosen_asset != "XAUUSD" else 2)
                 
                 conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO ai_ultimate_trades (asset, trade_type, strategy_used, lot_size, risk_amount, direction, entry, sl, tp, dxy_state) 
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (chosen_asset, style.upper(), chosen_strat, lot_size, risk_amt, direction, price, sl_val, tp_val, live_market_cache['DXY']))
+                """, (chosen_asset, f"{style.upper()}", chosen_strat, lot_size, risk_amt, direction, price, sl_val, tp_val, live_market_cache['DXY']))
                 conn.commit()
                 conn.close()
                 
+            # تقييم الصفقات وتحديث نتائجها في الأرشيف
             conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
             cursor = conn.cursor()
             cursor.execute("SELECT id, asset, entry, sl, tp, direction FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
@@ -313,7 +397,7 @@ def background_engine():
                         cursor.execute("UPDATE ai_ultimate_trades SET result = 'LOSS (ضرب الوقف)' WHERE id = ?", (t_id,))
                 else:
                     if curr_price <= t_tp:
-                        cursor.execute("UPDATE ai_ultimate_trades FROM ai_ultimate_trades SET result = 'WIN (هدف ناجح)' WHERE id = ?", (t_id,)) # (تصحيح طفيف للكلمات المفتاحية)
+                        cursor.execute("UPDATE ai_ultimate_trades SET result = 'WIN (هدف ناجح)' WHERE id = ?", (t_id,))
                     elif curr_price >= t_sl:
                         cursor.execute("UPDATE ai_ultimate_trades SET result = 'LOSS (ضرب الوقف)' WHERE id = ?", (t_id,))
             conn.commit()
@@ -323,3 +407,8 @@ def background_engine():
             print(f"Background engine error: {e}")
 
 threading.Thread(target=background_engine, daemon=True).start()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    server.serve_forever()
