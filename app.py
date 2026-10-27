@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 # ==========================================
-# 1. واجهة الويب الاحترافية المتكاملة (Web App UI)
+# 1. واجهة تطبيق الويب المتكاملة (Web App UI)
 # ==========================================
 HTML_DASHBOARD = """
 <!DOCTYPE html>
@@ -17,98 +17,154 @@ HTML_DASHBOARD = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate ICT & Macro Trading Engine - Pro</title>
+    <title>AI Trading Core - Ultimate Web App</title>
     <style>
-        :root { --bg-color: #0b0f19; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; --border: #334155; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; }
-        .container { max-width: 1300px; margin: 0 auto; }
-        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 15px; margin-bottom: 25px; flex-wrap: wrap; gap: 10px; }
-        h1 { margin: 0; font-size: 24px; color: var(--accent); }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 25px; }
-        .card { background-color: var(--card-bg); border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.4); border: 1px solid var(--border); }
-        .card h3 { margin-top: 0; color: #94a3b8; font-size: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-        .price { font-size: 28px; font-weight: bold; margin: 10px 0; color: #34d399; }
-        .badge { background: #0284c7; color: white; padding: 4px 10px; border-radius: 6px; font-size: 12px; }
-        .strategy-badge { background: #7c3aed; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; display: inline-block; margin-top: 8px; }
+        :root { --bg-color: #0b0f19; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; --border: #334155; --success: #10b981; --danger: #f43f5e; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
+        .container { max-width: 1350px; margin: 0 auto; }
+        
+        header { background: var(--card-bg); border: 1px solid var(--border); padding: 15px 20px; border-radius: 12px; margin-bottom: 20px; }
+        .header-title { font-size: 20px; font-weight: bold; color: var(--accent); margin-bottom: 8px; }
+        .info-bar { display: flex; flex-wrap: wrap; gap: 15px; font-size: 13px; color: #cbd5e1; }
+        .info-item { background: #0f172a; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); }
+        .info-item b { color: var(--accent); }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .card { background-color: var(--card-bg); border-radius: 12px; padding: 18px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .card h3 { margin-top: 0; color: #94a3b8; font-size: 15px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        .price { font-size: 24px; font-weight: bold; margin: 8px 0; color: var(--success); }
+        
+        /* الأزرار والتحكم */
+        .btn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .btn { background: #1e293b; color: white; border: 1px solid var(--border); padding: 12px 15px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: bold; text-align: center; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn:hover { background: #334155; border-color: var(--accent); }
+        .btn-active { background: #0284c7 !important; border-color: var(--accent) !important; }
+        .btn-danger { background: #9f1239 !important; }
+
+        /* الأقسام المنبثقة والتقارير */
+        .section-box { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; display: none; }
+        .section-box.active { display: block; }
+
+        /* استراتيجيات ICT */
+        .strat-card { background: #0f172a; border: 1px solid var(--border); padding: 12px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .strat-info { font-size: 13px; }
+        .strat-info b { color: #f1f5f9; font-size: 14px; }
+        .strat-stats { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+        .toggle-btn { background: #059669; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+        .toggle-btn.disabled { background: #475569; }
+
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 12px; text-align: right; border-bottom: 1px solid var(--border); font-size: 13px; }
-        th { color: #94a3b8; background: #111827; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; color: #94a3b8; font-size: 14px; }
-        input, select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #0f172a; color: white; font-size: 14px; box-sizing: border-box; }
-        button { background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
-        button:hover { background: #1d4ed8; }
-        .news-box { background: #111827; padding: 15px; border-radius: 8px; border-right: 4px solid #38bdf8; margin-bottom: 10px; font-size: 13px; line-height: 1.6; }
-        .footer { text-align: center; margin-top: 40px; color: #64748b; font-size: 13px; }
+        th, td { padding: 10px; text-align: right; border-bottom: 1px solid var(--border); font-size: 13px; }
+        th { color: #94a3b8; background: #0f172a; }
+
+        input, select { width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); background: #0f172a; color: white; font-size: 13px; box-sizing: border-box; margin-top: 5px; }
     </style>
 </head>
 <body>
     <div class="container">
+        
+        <!-- الهيدر وغرفة العمليات الذكية -->
         <header>
-            <h1>⚡ Ultimate ICT & Macro Analysis Engine</h1>
-            <div><span class="badge">Render Cloud: Active 24/7</span> | <span class="badge" style="background:#10b981;">Market: Live</span></div>
+            <div class="header-title">🏛️ غرفة العمليات الذكية (AI Trading Core)</div>
+            <div class="info-bar">
+                <div class="info-item">👨‍💻 المطوّر: <b>ENG: Abdulelah Sadeq</b></div>
+                <div class="info-item">📊 رأس المال: <b id="lbl-capital">$1000.00</b> | المخاطرة: <b id="lbl-risk">1.0%</b></div>
+                <div class="info-item">🤖 الإرسال التلقائي: <b id="lbl-dispatch">🟢 مفعل</b></div>
+                <div class="info-item">⚡ النمط: <b id="lbl-style">سكالبينج (Scalp)</b></div>
+                <div class="info-item">🎯 الأصل المخصص: <b id="lbl-asset">جميع الأزواج (ALL)</b></div>
+                <div class="info-item">🔴 الاستراتيجية النشطة: <b id="lbl-active-strat">--</b></div>
+            </div>
         </header>
 
-        <!-- أسعار الأسواق الحية والتحليلات -->
+        <!-- لوحة الأسعار الحية -->
         <div class="grid">
             <div class="card">
                 <h3>🪙 الذهب (XAU/USD)</h3>
                 <div class="price" id="price-xau">--</div>
-                <div id="strat-xau"><span class="strategy-badge">جاري تحليل ICT...</span></div>
             </div>
             <div class="card">
                 <h3>💶 اليورو (EUR/USD)</h3>
                 <div class="price" id="price-eur">--</div>
-                <div id="strat-eur"><span class="strategy-badge">جاري تحليل ICT...</span></div>
             </div>
             <div class="card">
                 <h3>💷 الباوند (GBP/USD)</h3>
                 <div class="price" id="price-gbp">--</div>
-                <div id="strat-gbp"><span class="strategy-badge">جاري تحليل ICT...</span></div>
             </div>
             <div class="card">
                 <h3>💵 مؤشر الدولار (DXY)</h3>
-                <div class="price" id="price-dxy" style="color:#f43f5e;">--</div>
-                <p>الحالة الهيكلية: ضغط مؤسسي وسيولة عليا</p>
+                <div class="price" id="price-dxy" style="color:var(--danger);">--</div>
             </div>
         </div>
 
-        <!-- لوحة التحكم وحاسبة المخاطر -->
-        <div class="grid" style="grid-template-columns: 1fr 2fr;">
-            <div class="card">
-                <h3>⚙️ إعدادات رأس المال والمخاطر</h3>
-                <form id="settings-form" onsubmit="updateSettings(event)">
-                    <div class="form-group">
-                        <label>رأس المال ($):</label>
-                        <input type="number" id="capital" value="1000" step="10">
-                    </div>
-                    <div class="form-group">
-                        <label>نسبة المخاطرة (%):</label>
-                        <input type="number" id="risk_pct" value="1.0" step="0.1">
-                    </div>
-                    <div class="form-group">
-                        <label>نوع التداول:</label>
-                        <select id="preferred_style">
-                            <option value="scalp">سكالبينج (Scalping - 1H/5M)</option>
-                            <option value="swing">سوينج (Swing - 4H/15M)</option>
-                        </select>
-                    </div>
-                    <button type="submit" style="width:100%;">حفظ وتحديث الإعدادات</button>
-                </form>
-            </div>
+        <!-- قائمة الأزرار الرئيسية (مطابقة للتيليجرام بالظبط) -->
+        <div class="btn-grid">
+            <button class="btn" onclick="toggleSection('sec-macro')">📊 التقرير الاقتصادي الشامل والمصادر</button>
+            <button class="btn" onclick="toggleSection('sec-manual')">⚡ الطلب اليدوي للتحليل والصفقات</button>
+            <button class="btn" id="btn-toggle-dispatch" onclick="apiToggleDispatch()">🔄 تبديل حالة الإرسال التلقائي</button>
+            <button class="btn" onclick="apiToggleStyle()">🔀 تبديل نمط الإرسال (Scalp/Swing)</button>
+            <button class="btn" onclick="toggleSection('sec-asset')">🎯 تحديد الأزواج للاستقبال التلقائي</button>
+            <button class="btn" onclick="toggleSection('sec-strats')">📈 تقرير أداء الاستراتيجيات وتفعيلها</button>
+            <button class="btn" onclick="toggleSection('sec-risk')">⚙️ تعديل رأس المال والمخاطرة</button>
+        </div>
 
-            <div class="card">
-                <h3>🌐 الأخبار الاقتصادية والجيوسياسية الفورية (Macro Feed)</h3>
-                <div id="news-container">
-                    <div class="news-box"><b>مؤشر أسعار المستهلكين (CPI):</b> جاري جلب التحليل الفوري وتأثيره على الذهب والعملات...</div>
-                    <div class="news-box"><b>قرارات الفيدرالي وسيولة DXY:</b> جاري تقييم مناطق الفجوات العادلة (FVG) وبنية السوق...</div>
-                </div>
+        <!-- 1. قسم التقرير الاقتصادي -->
+        <div id="sec-macro" class="section-box">
+            <h3>🌐 التقرير الاقتصادي والمالي والجيوسياسي الشامل</h3>
+            <div style="font-size: 13px; line-height: 1.7; color: #cbd5e1;">
+                <p><b>💵 مؤشر الدولار ($DXY):</b> مستويات السيولة الحالية تشير إلى ضغط مؤسسي هيكلي وتطلع نحو إعادة اختبار مناطق الفجوات العادلة (FVG).</p>
+                <p><b>📅 أهم الأخبار الاقتصادية:</b></p>
+                <ul>
+                    <li><b>مؤشر أسعار المستهلكين (CPI):</b> 3.0% (إيجابي طفيف للذهب، سلبي على الدولار).</li>
+                    <li><b>قرارات الفائدة وتصريحات الفيدرالي:</b> تركيز على بنية التضخم المستهدفة عند 2%.</li>
+                </ul>
             </div>
         </div>
 
-        <!-- جدول الصفقات والسجل الذكي -->
+        <!-- 2. قسم الطلب اليدوي -->
+        <div id="sec-manual" class="section-box">
+            <h3>⚡ الطلب اليدوي للتحليل الفني والصفقات</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 15px;">
+                <button class="btn" onclick="requestManualTrade('XAUUSD')">🪙 تحليل ونقطة دخول الذهب</button>
+                <button class="btn" onclick="requestManualTrade('EURUSD')">💶 تحليل ونقطة دخول اليورو</button>
+                <button class="btn" onclick="requestManualTrade('GBPUSD')">💷 تحليل ونقطة دخول الباوند</button>
+            </div>
+            <div id="manual-result" style="background:#0f172a; padding:15px; border-radius:8px; border:1px solid var(--border); display:none; font-size:13px; line-height:1.6;"></div>
+        </div>
+
+        <!-- 3. قسم تحديد الأزواج للاستقبال -->
+        <div id="sec-asset" class="section-box">
+            <h3>🎯 تحديد الأزواج للاستقبال التلقائي</h3>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button class="btn" onclick="setMonitoredAsset('ALL')">جميع الأزواج (ALL)</button>
+                <button class="btn" onclick="setMonitoredAsset('XAUUSD')">الذهب فقط (XAUUSD)</button>
+                <button class="btn" onclick="setMonitoredAsset('EURUSD')">اليورو فقط (EURUSD)</button>
+                <button class="btn" onclick="setMonitoredAsset('GBPUSD')">الباوند فقط (GBPUSD)</button>
+            </div>
+        </div>
+
+        <!-- 4. قسم تقرير أداء الاستراتيجيات السبع وتفعيلها (مثل صورة التيليجرام) -->
+        <div id="sec-strats" class="section-box">
+            <h3>📈 تقرير أداء وأرشيف الاستراتيجيات الـ 7 (Strategy Performance)</h3>
+            <div id="strategies-container">
+                <!-- تعبئة الاستراتيجيات والـ Win Rate وإزرار التفعيل -->
+            </div>
+        </div>
+
+        <!-- 5. قسم تعديل رأس المال والمخاطرة -->
+        <div id="sec-risk" class="section-box">
+            <h3>⚙️ تعديل رأس المال ونسبة المخاطرة (Risk Config)</h3>
+            <form onsubmit="saveRiskConfig(event)" style="max-width: 400px;">
+                <label>رأس المال ($):</label>
+                <input type="number" id="inp-capital" step="10">
+                <label style="margin-top:10px;">نسبة المخاطرة (%):</label>
+                <input type="number" id="inp-risk" step="0.1">
+                <button class="btn btn-active" style="width:100%; margin-top:15px;">حفظ التعديلات</button>
+            </form>
+        </div>
+
+        <!-- جدول أرشيف الصفقات -->
         <div class="card">
-            <h3>📊 سجل الصفقات الذكية وتطبيقات استراتيجيات ICT الـ 7</h3>
+            <h3>📊 سجل الصفقات الذكية وتطبيقات استراتيجيات ICT</h3>
             <div style="overflow-x: auto;">
                 <table>
                     <thead>
@@ -116,7 +172,7 @@ HTML_DASHBOARD = """
                             <th>#ID</th>
                             <th>الأصل</th>
                             <th>النمط</th>
-                            <th>استراتيجية ICT</th>
+                            <th>الاستراتيجية</th>
                             <th>العقد (Lot)</th>
                             <th>الدخول</th>
                             <th>الوقف (SL)</th>
@@ -125,18 +181,25 @@ HTML_DASHBOARD = """
                         </tr>
                     </thead>
                     <tbody id="trades-table">
-                        <tr><td colspan="9" style="text-align:center;">جاري تحميل سجلات الصفقات...</td></tr>
+                        <tr><td colspan="9" style="text-align:center;">جاري تحميل سجل الصفقات...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
-        
-        <div class="footer">
-            تم التطوير بواسطة عبد الإله صادق | محطة التداول والتحليل الذكي المتكاملة
-        </div>
+
     </div>
 
     <script>
+        function toggleSection(secId) {
+            document.querySelectorAll('.section-box').forEach(el => {
+                if(el.id === secId) {
+                    el.classList.toggle('active');
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+        }
+
         function updateDashboard() {
             fetch('/api/data')
                 .then(res => res.json())
@@ -145,19 +208,34 @@ HTML_DASHBOARD = """
                     document.getElementById('price-eur').innerText = data.prices.EURUSD;
                     document.getElementById('price-gbp').innerText = data.prices.GBPUSD;
                     document.getElementById('price-dxy').innerText = data.prices.DXY;
-                    
-                    if(data.settings) {
-                        document.getElementById('capital').value = data.settings.capital;
-                        document.getElementById('risk_pct').value = data.settings.risk_pct;
-                        document.getElementById('preferred_style').value = data.settings.preferred_style;
+
+                    document.getElementById('lbl-capital').innerText = '$' + data.settings.capital;
+                    document.getElementById('lbl-risk').innerText = data.settings.risk_pct + '%';
+                    document.getElementById('lbl-dispatch').innerText = data.settings.auto_dispatch_active ? '🟢 مفعل' : '🔴 متوقف';
+                    document.getElementById('lbl-style').innerText = data.settings.preferred_style === 'scalp' ? 'سكالبينج (Scalp)' : 'سوينج (Swing)';
+                    document.getElementById('lbl-asset').innerText = data.settings.selected_auto_asset;
+                    document.getElementById('lbl-active-strat').innerText = data.settings.active_weekly_strategy;
+
+                    document.getElementById('inp-capital').value = data.settings.capital;
+                    document.getElementById('inp-risk').value = data.settings.risk_pct;
+
+                    // عرض قائمة الاستراتيجيات وتفعيلها
+                    if(data.strats_performance) {
+                        let html = '';
+                        data.strats_performance.forEach(s => {
+                            let isActive = s.name === data.settings.active_weekly_strategy;
+                            html += `<div class="strat-card">
+                                <div class="strat-info">
+                                    <b>📌 ${s.name}</b> ${isActive ? '<span style="color:#10b981;">[الاستراتيجية النشطة حالياً] 🟢</span>' : '<span style="color:#94a3b8;">[متاحة للتفعيل] ⚪</span>'}
+                                    <div class="strat-stats">الصفقات: ${s.total} | ربح: ✅ ${s.win} | خسارة: ❌ ${s.loss} | النسبة: 🎯 <b>${s.win_rate}%</b></div>
+                                </div>
+                                <button class="toggle-btn ${isActive ? 'disabled' : ''}" onclick="activateStrategy('${s.name}')">${isActive ? 'مفعلة حالياً' : 'تفعيل الاستراتيجية 🎯'}</button>
+                            </div>`;
+                        });
+                        document.getElementById('strategies-container').innerHTML = html;
                     }
 
-                    if(data.latest_strats) {
-                        if(data.latest_strats.XAUUSD) document.getElementById('strat-xau').innerHTML = `<span class="strategy-badge">${data.latest_strats.XAUUSD}</span>`;
-                        if(data.latest_strats.EURUSD) document.getElementById('strat-eur').innerHTML = `<span class="strategy-badge">${data.latest_strats.EURUSD}</span>`;
-                        if(data.latest_strats.GBPUSD) document.getElementById('strat-gbp').innerHTML = `<span class="strategy-badge">${data.latest_strats.GBPUSD}</span>`;
-                    }
-                    
+                    // الصفقات
                     let tbody = document.getElementById('trades-table');
                     if(data.trades && data.trades.length > 0) {
                         let html = '';
@@ -169,9 +247,9 @@ HTML_DASHBOARD = """
                                 <td><code style="color:#38bdf8;">${t[3]}</code></td>
                                 <td>${t[4]}</td>
                                 <td>${t[7]}</td>
-                                <td style="color:#f43f5e;">${t[8]}</td>
-                                <td style="color:#34d399;">${t[9]}</td>
-                                <td><span class="badge">${t[11]}</span></td>
+                                <td style="color:var(--danger);">${t[8]}</td>
+                                <td style="color:var(--success);">${t[9]}</td>
+                                <td><span class="info-item">${t[11]}</span></td>
                             </tr>`;
                         });
                         tbody.innerHTML = html;
@@ -179,22 +257,51 @@ HTML_DASHBOARD = """
                 });
         }
 
-        function updateSettings(e) {
-            e.preventDefault();
-            let cap = document.getElementById('capital').value;
-            let risk = document.getElementById('risk_pct').value;
-            let style = document.getElementById('preferred_style').value;
+        function apiToggleDispatch() {
+            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'toggle_dispatch'})}).then(() => updateDashboard());
+        }
 
-            fetch('/api/settings', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({capital: cap, risk_pct: risk, preferred_style: style})
-            }).then(res => res.json()).then(resp => {
-                alert('✅ تم تحديث إعدادات المخاطر ورأس المال بنجاح!');
+        function apiToggleStyle() {
+            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'toggle_style'})}).then(() => updateDashboard());
+        }
+
+        function setMonitoredAsset(ast) {
+            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'set_asset', asset: ast})}).then(() => {
+                alert('✅ تم تغيير الأصل المستهدف إلى: ' + ast);
+                updateDashboard();
             });
         }
 
-        setInterval(updateDashboard, 5000);
+        function activateStrategy(stratName) {
+            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'set_strategy', strategy: stratName})}).then(() => updateDashboard());
+        }
+
+        function saveRiskConfig(e) {
+            e.preventDefault();
+            let cap = document.getElementById('inp-capital').value;
+            let risk = document.getElementById('inp-risk').value;
+            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'save_risk', capital: cap, risk_pct: risk})}).then(() => {
+                alert('✅ تم حفظ التعديلات بنجاح');
+                updateDashboard();
+            });
+        }
+
+        function requestManualTrade(asset) {
+            fetch('/api/action', {method: 'POST', body: JSON.stringify({action: 'manual_trade', asset: asset})})
+                .then(res => res.json())
+                .then(data => {
+                    let box = document.getElementById('manual-result');
+                    box.style.display = 'block';
+                    box.innerHTML = `<b>🚨 إشارة تحليل يدوي متقدم (${asset}):</b><br>
+                    • الاتجاه: <b>${data.direction}</b><br>
+                    • الاستراتيجية: <b>${data.strategy}</b><br>
+                    • سعر الدخول: <code>${data.entry}</code> | SL: <code style="color:red;">${data.sl}</code> | TP: <code style="color:green;">${data.tp}</code><br>
+                    • العقد المحسوب: <code>${data.lot} Lot</code> | المخاطرة: <code>$${data.risk_amt}</code>`;
+                    updateDashboard();
+                });
+        }
+
+        setInterval(updateDashboard, 4000);
         updateDashboard();
     </script>
 </body>
@@ -218,56 +325,84 @@ class SimpleHandler(BaseHTTPRequestHandler):
             cursor.execute("SELECT * FROM ai_ultimate_trades ORDER BY id DESC LIMIT 15")
             trades = cursor.fetchall()
             
-            latest_strats = {}
-            for ast in ["XAUUSD", "EURUSD", "GBPUSD"]:
-                cursor.execute("SELECT strategy_used FROM ai_ultimate_trades WHERE asset = ? ORDER BY id DESC LIMIT 1", (ast,))
+            # تقرير أداء الاستراتيجيات الـ 7
+            strats_perf = []
+            for st in ICT_STRATEGIES:
+                cursor.execute("SELECT COUNT(*), SUM(CASE WHEN result LIKE '%WIN%' THEN 1 ELSE 0 END), SUM(CASE WHEN result LIKE '%LOSS%' THEN 1 ELSE 0 END) FROM ai_ultimate_trades WHERE strategy_used = ?", (st,))
                 row = cursor.fetchone()
-                if row:
-                    latest_strats[ast] = row[0]
-                else:
-                    latest_strats[ast] = ICT_STRATEGIES[0]
+                tot = row[0] or 0
+                win = row[1] or 0
+                loss = row[2] or 0
+                wr = round((win / tot * 100), 1) if tot > 0 else 0.0
+                strats_perf.append({"name": st, "total": tot, "win": win, "loss": loss, "win_rate": wr})
+                
             conn.close()
             
             payload = {
                 "prices": live_market_cache,
                 "trades": trades,
-                "latest_strats": latest_strats,
-                "settings": bot_settings
+                "settings": bot_settings,
+                "strats_performance": strats_perf
             }
             self.wfile.write(json.dumps(payload).encode('utf-8'))
-        else:
-            self.send_response(404)
-            self.end_headers()
 
     def do_POST(self):
-        if self.path == '/api/settings':
+        if self.path == '/api/action':
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
+            resp_data = {"status": "success"}
             try:
                 data = json.loads(post_data.decode('utf-8'))
-                bot_settings['capital'] = float(data.get('capital', 1000))
-                bot_settings['risk_pct'] = float(data.get('risk_pct', 1.0))
-                bot_settings['preferred_style'] = data.get('preferred_style', 'scalp')
-            except Exception:
-                pass
+                act = data.get('action')
+                if act == 'toggle_dispatch':
+                    bot_settings['auto_dispatch_active'] = not bot_settings['auto_dispatch_active']
+                elif act == 'toggle_style':
+                    bot_settings['preferred_style'] = 'swing' if bot_settings['preferred_style'] == 'scalp' else 'scalp'
+                elif act == 'set_asset':
+                    bot_settings['selected_auto_asset'] = data.get('asset', 'ALL')
+                elif act == 'set_strategy':
+                    bot_settings['active_weekly_strategy'] = data.get('strategy')
+                elif act == 'save_risk':
+                    bot_settings['capital'] = float(data.get('capital', 1000))
+                    bot_settings['risk_pct'] = float(data.get('risk_pct', 1.0))
+                elif act == 'manual_trade':
+                    ast = data.get('asset', 'XAUUSD')
+                    price = live_market_cache.get(ast, 2800.0)
+                    strat = bot_settings['active_weekly_strategy']
+                    style = bot_settings['preferred_style']
+                    cap = bot_settings['capital']
+                    risk_pct = bot_settings['risk_pct']
+                    risk_amt = cap * (risk_pct / 100.0)
+                    stop_pips = 10.0 if style == 'scalp' else 35.0
+                    lot = round(risk_amt / (stop_pips * 10), 2) or 0.01
+                    direction = "🟢 شراء (BUY - إشارة سيولة)" if random.random() > 0.5 else "🔴 بيع (SELL - ضغط بيعي)"
+                    mult = 1.0 if style == 'scalp' else 3.0
+                    sl = round(price - (2.5*mult) if ast=="XAUUSD" else price - (0.0020*mult), 4 if ast!="XAUUSD" else 2)
+                    tp = round(price + (5.0*mult) if ast=="XAUUSD" else price + (0.0040*mult), 4 if ast!="XAUUSD" else 2)
+                    
+                    conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT INTO ai_ultimate_trades (asset, trade_type, strategy_used, lot_size, risk_amount, direction, entry, sl, tp, dxy_state) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (ast, f"MANUAL-{style.upper()}", strat, lot, risk_amt, direction, price, sl, tp, live_market_cache['DXY']))
+                    conn.commit()
+                    conn.close()
+                    
+                    resp_data = {"direction": direction, "strategy": strat, "entry": price, "sl": sl, "tp": tp, "lot": lot, "risk_amt": risk_amt}
+            except Exception as e:
+                resp_data = {"error": str(e)}
             
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            self.wfile.write(json.dumps(resp_data).encode('utf-8'))
 
     def log_message(self, format, *args):
         pass
 
-def run_web_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
-    server.serve_forever()
-
-threading.Thread(target=run_web_server, daemon=True).start()
-
 # ==========================================
-# 2. إعدادات استراتيجيات ICT السبع والثوابت
+# 2. الثوابت وإعدادات النظام
 # ==========================================
 ICT_STRATEGIES = [
     "1. FVG Mitigation (تخفيف الفجوات العادلة)",
@@ -282,9 +417,10 @@ ICT_STRATEGIES = [
 bot_settings = {
     'capital': 1000.0,
     'risk_pct': 1.0,
-    'stop_pips': 15.0,
     'auto_dispatch_active': True,
-    'preferred_style': 'scalp'
+    'preferred_style': 'scalp',
+    'selected_auto_asset': 'ALL',
+    'active_weekly_strategy': ICT_STRATEGIES[0]
 }
 
 live_market_cache = {
@@ -294,9 +430,6 @@ live_market_cache = {
     'DXY': 104.20
 }
 
-# ==========================================
-# 3. إعداد قاعدة البيانات المحلية (SQLite)
-# ==========================================
 def init_db():
     conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
     cursor = conn.cursor()
@@ -322,9 +455,6 @@ def init_db():
 
 init_db()
 
-# ==========================================
-# 4. محرك التحليل والأسواق والذكاء 24/7
-# ==========================================
 def fetch_live_market_data():
     global live_market_cache
     try:
@@ -340,54 +470,41 @@ def fetch_live_market_data():
     return live_market_cache
 
 def background_engine():
-    print("🚀 Pro Macro & ICT 7-Strategies Engine running 24/7...")
+    print("🚀 Full Web App Trading Core running 24/7...")
     while True:
         try:
-            time.sleep(45)
+            time.sleep(40)
             fetch_live_market_data()
-            
             if bot_settings['auto_dispatch_active']:
-                assets = ["XAUUSD", "EURUSD", "GBPUSD"]
-                chosen_asset = random.choice(assets)
-                chosen_strat = random.choice(ICT_STRATEGIES)
-                
-                price = live_market_cache.get(chosen_asset, 2800.0)
+                asset_choice = bot_settings['selected_auto_asset']
+                chosen_asset = random.choice(["XAUUSD", "EURUSD", "GBPUSD"]) if asset_choice == 'ALL' else asset_choice
+                strat = bot_settings['active_weekly_strategy']
                 style = bot_settings['preferred_style']
-                capital = bot_settings['capital']
+                price = live_market_cache.get(chosen_asset, 2800.0)
+                cap = bot_settings['capital']
                 risk_pct = bot_settings['risk_pct']
-                risk_amt = capital * (risk_pct / 100.0)
-                
-                # حساب حجم العقد بناءً على النمط (سكالبينج أهداف قريبة / سوينج أهداف واسعة)
+                risk_amt = cap * (risk_pct / 100.0)
                 stop_pips = 10.0 if style == 'scalp' else 35.0
-                lot_size = round(risk_amt / (stop_pips * 10), 2)
-                if lot_size < 0.01:
-                    lot_size = 0.01
-                    
-                direction = "🟢 شراء (BUY - إشارة سيولة مؤسسية)" if random.random() > 0.5 else "🔴 بيع (SELL - ضغط بيعي مؤسسي)"
-                
-                multiplier = 1.0 if style == 'scalp' else 3.0
-                if "شراء" in direction:
-                    sl_val = round(price - (2.5 * multiplier) if chosen_asset == "XAUUSD" else price - (0.0020 * multiplier), 4 if chosen_asset != "XAUUSD" else 2)
-                    tp_val = round(price + (5.0 * multiplier) if chosen_asset == "XAUUSD" else price + (0.0040 * multiplier), 4 if chosen_asset != "XAUUSD" else 2)
-                else:
-                    sl_val = round(price + (2.5 * multiplier) if chosen_asset == "XAUUSD" else price + (0.0020 * multiplier), 4 if chosen_asset != "XAUUSD" else 2)
-                    tp_val = round(price - (5.0 * multiplier) if chosen_asset == "XAUUSD" else price - (0.0040 * multiplier), 4 if chosen_asset != "XAUUSD" else 2)
+                lot = round(risk_amt / (stop_pips * 10), 2) or 0.01
+                direction = "🟢 شراء (BUY - إشارة سيولة)" if random.random() > 0.5 else "🔴 بيع (SELL - ضغط بيعي)"
+                mult = 1.0 if style == 'scalp' else 3.0
+                sl = round(price - (2.5*mult) if chosen_asset=="XAUUSD" else price - (0.0020*mult), 4 if chosen_asset!="XAUUSD" else 2)
+                tp = round(price + (5.0*mult) if chosen_asset=="XAUUSD" else price + (0.0040*mult), 4 if chosen_asset!="XAUUSD" else 2)
                 
                 conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO ai_ultimate_trades (asset, trade_type, strategy_used, lot_size, risk_amount, direction, entry, sl, tp, dxy_state) 
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (chosen_asset, f"{style.upper()}", chosen_strat, lot_size, risk_amt, direction, price, sl_val, tp_val, live_market_cache['DXY']))
+                """, (chosen_asset, style.upper(), strat, lot, risk_amt, direction, price, sl, tp, live_market_cache['DXY']))
                 conn.commit()
                 conn.close()
-                
-            # تقييم الصفقات وتحديث نتائجها في الأرشيف
+
+            # التقييم التلقائي
             conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
             cursor = conn.cursor()
             cursor.execute("SELECT id, asset, entry, sl, tp, direction FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
             pending = cursor.fetchall()
-            
             for t_id, t_asset, t_entry, t_sl, t_tp, t_dir in pending:
                 curr_price = live_market_cache.get(t_asset, t_entry)
                 if "شراء" in t_dir:
@@ -402,9 +519,8 @@ def background_engine():
                         cursor.execute("UPDATE ai_ultimate_trades SET result = 'LOSS (ضرب الوقف)' WHERE id = ?", (t_id,))
             conn.commit()
             conn.close()
-            
         except Exception as e:
-            print(f"Background engine error: {e}")
+            print(f"Background error: {e}")
 
 threading.Thread(target=background_engine, daemon=True).start()
 
