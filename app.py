@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Pro Trading & Macro Intelligence Engine v3.0
+Pro Trading & Macro Intelligence Engine v4.0
 =============================================
-Single-file production server:
-  • Real-time Yahoo Finance price feed (v8 chart API, keyless)
-  • Live macro intelligence (VIX, US10Y, DXY, GSR, COT, calendar, central banks)
-  • ICT + Macro Confluence Engine (score 0–10)
-  • Full bilingual UI (English / العربية)
-  • SQLite persistence · AI self-learning · strict risk engine
+Single-file production server (Python stdlib only).
+
+Price accuracy strategy:
+  • XAU/USD & XAG/USD  →  gold-api.com (keyless, real SPOT, no futures basis)
+  • EUR/USD GBP/USD USD/JPY DXY  →  Yahoo Finance v8 (regularMarketPrice, no delay injection)
+  • Absolute fallback  →  Yahoo Finance (GC=F / SI=F) only if spot source is down
+  • NO micro-tick noise, NO random walk, NO drift. Prices are exactly what the source returns.
+
+Bilingual UI:
+  • applyLanguage() re-renders every dynamic table, select and label from cached
+    state synchronously — no async race, no failure, no reload.
 
 Run:   python app.py
 Port:  $PORT (default 8000)
@@ -28,6 +33,7 @@ from datetime import datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 # ============================================================================
 # CONFIGURATION
@@ -46,40 +52,55 @@ SHUTDOWN    = threading.Event()
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-HTTP_TIMEOUT = 6.0
+HTTP_TIMEOUT = 7.0
 
 # ============================================================================
-# SYMBOL UNIVERSE  (Yahoo Finance tickers)
+# SYMBOL UNIVERSE
 # ============================================================================
+# NOTE:
+#   • metals_spot=True → fetch from gold-api.com (true spot, no futures basis)
+#   • metals_spot=False → fetch from Yahoo Finance v8 (regularMarketPrice)
 SYMBOLS = {
     "XAU/USD": {
-        "yahoo": "GC=F", "base": 2350.0, "decimals": 2, "mult": 100,
-        "pip": 0.01, "spread": 0.30, "label_en": "Gold", "label_ar": "الذهب",
+        "yahoo": "GC=F", "spot_code": "XAU", "metals_spot": True,
+        "base": 2350.0, "decimals": 2, "mult": 100,
+        "pip": 0.01, "spread": 0.30,
+        "label_en": "Gold", "label_ar": "الذهب",
     },
     "XAG/USD": {
-        "yahoo": "SI=F", "base": 27.50, "decimals": 3, "mult": 1000,
-        "pip": 0.01, "spread": 0.020, "label_en": "Silver", "label_ar": "الفضة",
+        "yahoo": "SI=F", "spot_code": "XAG", "metals_spot": True,
+        "base": 27.50, "decimals": 3, "mult": 1000,
+        "pip": 0.01, "spread": 0.020,
+        "label_en": "Silver", "label_ar": "الفضة",
     },
     "EUR/USD": {
-        "yahoo": "EURUSD=X", "base": 1.0850, "decimals": 5, "mult": 100000,
-        "pip": 0.0001, "spread": 0.00008, "label_en": "Euro", "label_ar": "اليورو",
+        "yahoo": "EURUSD=X", "spot_code": None, "metals_spot": False,
+        "base": 1.0850, "decimals": 5, "mult": 100000,
+        "pip": 0.0001, "spread": 0.00008,
+        "label_en": "Euro", "label_ar": "اليورو",
     },
     "GBP/USD": {
-        "yahoo": "GBPUSD=X", "base": 1.2700, "decimals": 5, "mult": 100000,
-        "pip": 0.0001, "spread": 0.00010, "label_en": "Sterling", "label_ar": "الإسترليني",
+        "yahoo": "GBPUSD=X", "spot_code": None, "metals_spot": False,
+        "base": 1.2700, "decimals": 5, "mult": 100000,
+        "pip": 0.0001, "spread": 0.00010,
+        "label_en": "Sterling", "label_ar": "الإسترليني",
     },
     "USD/JPY": {
-        "yahoo": "USDJPY=X", "base": 155.00, "decimals": 3, "mult": 1000,
-        "pip": 0.01, "spread": 0.015, "label_en": "Yen", "label_ar": "الين",
+        "yahoo": "USDJPY=X", "spot_code": None, "metals_spot": False,
+        "base": 155.00, "decimals": 3, "mult": 1000,
+        "pip": 0.01, "spread": 0.015,
+        "label_en": "Yen", "label_ar": "الين",
     },
     "DXY": {
-        "yahoo": "DX-Y.NYB", "base": 105.00, "decimals": 3, "mult": 1000,
-        "pip": 0.01, "spread": 0.020, "label_en": "Dollar Index", "label_ar": "مؤشر الدولار",
+        "yahoo": "DX-Y.NYB", "spot_code": None, "metals_spot": False,
+        "base": 105.00, "decimals": 3, "mult": 1000,
+        "pip": 0.01, "spread": 0.020,
+        "label_en": "Dollar Index", "label_ar": "مؤشر الدولار",
     },
 }
 
 # ============================================================================
-# TRADE MODES — MULTI-TIMEFRAME EXECUTION HIERARCHY
+# TRADE MODES
 # ============================================================================
 TRADE_MODES = {
     "SCALPING_A": {
@@ -97,7 +118,7 @@ TRADE_MODES = {
 }
 
 # ============================================================================
-# ICT STRATEGIES (10 institutional concepts)
+# ICT STRATEGIES
 # ============================================================================
 ICT_STRATEGIES = [
     "Liquidity Sweep & Stop Hunt",
@@ -192,7 +213,7 @@ COT_STATE = {
 }
 
 # ============================================================================
-# ECONOMIC CALENDAR (2026 institutional schedule, computed dynamically)
+# ECONOMIC CALENDAR SEED
 # ============================================================================
 CALENDAR_SEED = [
     {"month": 1,  "day": 28, "event_en": "FOMC Rate Decision",   "event_ar": "قرار الفائدة الفيدرالي",   "currency": "USD", "impact": "HIGH",   "forecast": "3.75%", "previous": "4.00%"},
@@ -248,17 +269,10 @@ CALENDAR_SEED = [
 ]
 
 # ============================================================================
-# SESSION / KILL ZONE HELPERS
+# HELPERS
 # ============================================================================
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-def session_volatility(hour_utc: int) -> float:
-    if 12 <= hour_utc < 16: return 1.85
-    if 7 <= hour_utc < 12:  return 1.55
-    if 16 <= hour_utc < 21: return 1.30
-    if 1 <= hour_utc < 7:   return 0.85
-    return 0.65
 
 def active_session() -> str:
     h = datetime.now(timezone.utc).hour
@@ -431,7 +445,6 @@ def init_db() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_learning_created ON self_learning(created_at)")
 
-            # ---- Migrations for older DBs ----
             cols = [r["name"] for r in cur.execute("PRAGMA table_info(trades)").fetchall()]
             if "confluence_score" not in cols:
                 cur.execute("ALTER TABLE trades ADD COLUMN confluence_score REAL DEFAULT 0")
@@ -468,10 +481,21 @@ def init_db() -> None:
             c.close()
 
 # ============================================================================
-# YAHOO FINANCE REAL-TIME FETCHER
+# PRICE FETCHERS — ACCURATE, NO NOISE
 # ============================================================================
+def fetch_metals_spot(spot_code: str):
+    """True spot price from gold-api.com (keyless). Returns (price, None, None, None)."""
+    url = f"https://api.gold-api.com/price/{spot_code}"
+    req = Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+    with urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    price = payload.get("price")
+    if price is None:
+        raise ValueError(f"gold-api: no price field for {spot_code}")
+    return float(price), None, None, None
+
 def fetch_yahoo_quote(ticker: str):
-    """Returns (price, prev_close, day_high, day_low). Raises on failure."""
+    """Yahoo Finance v8 — returns (price, prev_close, day_high, day_low) from meta."""
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
            f"{ticker}?interval=1m&range=1d")
     req = Request(url, headers={
@@ -502,21 +526,21 @@ def fetch_yahoo_quote(ticker: str):
         float(low) if low is not None else None,
     )
 
-def apply_market_tick(sym: str, price: float, prev_close: float,
-                      day_high, day_low, source: str) -> None:
+def apply_tick(sym: str, price: float, prev_close, day_high, day_low, source: str) -> None:
+    """Apply a real market tick exactly as received — no noise, no drift."""
     cfg = SYMBOLS[sym]
     with PRICE_LOCK:
         st = PRICES[sym]
         st["prev_price"] = st["price"]
-        st["price"] = max(0.000001, price)
-        if prev_close:
-            st["prev_close"] = prev_close
+        st["price"] = float(price)
+        if prev_close is not None:
+            st["prev_close"] = float(prev_close)
         if day_high is not None:
-            st["high"] = max(st["high"], day_high)
+            st["high"] = max(st["high"], float(day_high))
         if day_low is not None:
-            st["low"] = min(st["low"], day_low)
+            st["low"] = min(st["low"], float(day_low))
         st["high"] = max(st["high"], st["price"])
-        st["low"] = min(st["low"], st["price"])
+        st["low"]  = min(st["low"],  st["price"])
         st["last_update"] = now_iso()
         st["source"] = source
         st["stale"] = False
@@ -525,64 +549,28 @@ def apply_market_tick(sym: str, price: float, prev_close: float,
         if len(h) > 120:
             h.pop(0)
 
-def simulate_tick(sym: str) -> None:
-    """Realistic fallback random-walk when the real feed is unreachable."""
-    cfg = SYMBOLS[sym]
-    with PRICE_LOCK:
-        st = PRICES[sym]
-        sigma = cfg["base"] * 0.000035 * session_volatility(datetime.now(timezone.utc).hour)
-        shock = random.gauss(0.0, sigma)
-        new_price = max(0.000001, st["price"] + shock)
-        st["prev_price"] = st["price"]
-        st["price"] = new_price
-        st["high"] = max(st["high"], new_price)
-        st["low"] = min(st["low"], new_price)
-        st["last_update"] = now_iso()
-        st["stale"] = True
-        st["source"] = "sim"
-        h = st["history"]
-        h.append(new_price)
-        if len(h) > 120:
-            h.pop(0)
-
-def real_feed_loop() -> None:
-    """Poll Yahoo Finance every 3 s for all 6 symbols."""
-    while not SHUTDOWN.is_set():
-        for sym, cfg in SYMBOLS.items():
-            try:
-                price, prev_close, hi, lo = fetch_yahoo_quote(cfg["yahoo"])
-                apply_market_tick(sym, price, prev_close, hi, lo, "yahoo")
-            except Exception as exc:
-                print(f"[feed] {sym} fetch failed: {exc}", flush=True)
-                simulate_tick(sym)
-        SHUTDOWN.wait(3.0)
-
-def micro_tick_loop() -> None:
-    """1-second visual micro-ticks with bid/ask spread noise on top of the real price."""
-    while not SHUTDOWN.is_set():
+def fetch_all_prices() -> None:
+    """One full refresh cycle across all symbols."""
+    for sym, cfg in SYMBOLS.items():
         try:
-            with PRICE_LOCK:
-                for sym, cfg in SYMBOLS.items():
-                    st = PRICES[sym]
-                    if st["stale"]:
-                        continue
-                    noise = random.gauss(0.0, cfg["spread"] * 0.22)
-                    new_price = max(0.000001, st["price"] + noise)
-                    st["prev_price"] = st["price"]
-                    st["price"] = new_price
-                    st["high"] = max(st["high"], new_price)
-                    st["low"] = min(st["low"], new_price)
-                    st["last_update"] = now_iso()
-                    h = st["history"]
-                    h.append(new_price)
-                    if len(h) > 120:
-                        h.pop(0)
+            if cfg["metals_spot"]:
+                try:
+                    price, _, _, _ = fetch_metals_spot(cfg["spot_code"])
+                    apply_tick(sym, price, None, None, None, "gold-api-spot")
+                    continue
+                except Exception as spot_exc:
+                    print(f"[price] {sym} spot failed ({spot_exc}) — falling back to Yahoo", flush=True)
+            price, prev_close, hi, lo = fetch_yahoo_quote(cfg["yahoo"])
+            apply_tick(sym, price, prev_close, hi, lo, "yahoo")
         except Exception as exc:
-            print(f"[micro_tick] {exc}", flush=True)
-        SHUTDOWN.wait(1.0)
+            print(f"[price] {sym} fetch failed: {exc}", flush=True)
+
+def price_feed_loop() -> None:
+    while not SHUTDOWN.is_set():
+        fetch_all_prices()
+        SHUTDOWN.wait(2.0)
 
 def day_rollover_loop() -> None:
-    """Reset daily open/high/low at UTC midnight."""
     last_day = datetime.now(timezone.utc).date()
     while not SHUTDOWN.is_set():
         try:
@@ -601,7 +589,7 @@ def day_rollover_loop() -> None:
         SHUTDOWN.wait(30.0)
 
 # ============================================================================
-# MACRO ENGINE (VIX, US10Y, DXY, GSR, regime, geo risk)
+# MACRO ENGINE
 # ============================================================================
 def macro_fetch_loop() -> None:
     while not SHUTDOWN.is_set():
@@ -612,8 +600,6 @@ def macro_fetch_loop() -> None:
                 MACRO["vix"] = round(vix_price, 2)
         except Exception as exc:
             print(f"[macro] VIX fetch failed: {exc}", flush=True)
-            with MACRO_LOCK:
-                MACRO["vix"] = max(8.0, MACRO["vix"] + random.gauss(0.0, 0.06))
 
         # US 10Y
         try:
@@ -623,14 +609,11 @@ def macro_fetch_loop() -> None:
                 MACRO["us10y"] = round(us10y, 3)
         except Exception as exc:
             print(f"[macro] US10Y fetch failed: {exc}", flush=True)
-            with MACRO_LOCK:
-                MACRO["us10y"] = round(max(0.5, min(7.5, MACRO["us10y"] + random.gauss(0.0, 0.004))), 3)
 
         with MACRO_LOCK:
             MACRO["regime"] = classify_regime(MACRO["vix"])
             MACRO["safe_haven"] = classify_safe_haven(MACRO["regime"])
 
-            # Geopolitical risk score driven by VIX + US10Y + GSR
             with PRICE_LOCK:
                 xau = PRICES["XAU/USD"]["price"]
                 xag = PRICES["XAG/USD"]["price"]
@@ -697,7 +680,6 @@ def fetch_cot() -> None:
             oi = row.get("open_interest")
             if net is None:
                 continue
-            # Distribute net into long/short around open interest if available
             if oi and oi > abs(net):
                 long_v = int((oi + net) / 2)
                 short_v = int((oi - net) / 2)
@@ -705,11 +687,12 @@ def fetch_cot() -> None:
                 long_v = max(0, int(net) + 50000)
                 short_v = max(0, 50000 - int(net))
             prev_net = net - (chg if chg is not None else 0)
-            prev_long = int((long_v + prev_net) / 2) if long_v else long_v
-            prev_short = int((short_v - prev_net) / 2) if short_v else short_v
             if chg is not None and oi and oi > abs(prev_net):
                 prev_long = int((oi + prev_net) / 2)
                 prev_short = int((oi - prev_net) / 2)
+            else:
+                prev_long = long_v
+                prev_short = short_v
             COT_STATE[asset]["long"] = long_v
             COT_STATE[asset]["short"] = short_v
             COT_STATE[asset]["prev_long"] = prev_long
@@ -756,11 +739,10 @@ def build_calendar() -> list:
     return out[:14]
 
 # ============================================================================
-# CONFLUENCE ENGINE (Technical ICT × Macro × COT × Timing)
+# CONFLUENCE ENGINE
 # ============================================================================
 def macro_bias_for_symbol(symbol: str) -> str:
     regime = MACRO["regime"]
-    vix = MACRO["vix"]
     us10y = MACRO["us10y"]
     with PRICE_LOCK:
         dxy_price = PRICES["DXY"]["price"]
@@ -812,7 +794,6 @@ def cot_bias_for_symbol(symbol: str) -> str:
         net = row["long"] - row["short"]
         delta = (row["long"] - row["prev_long"]) - (row["short"] - row["prev_short"])
     if asset == "JPY":
-        # JPY net long = yen bullish = USD/JPY bearish
         if net > 0 and delta > 0:
             return "bearish"
         if net < 0 and delta < 0:
@@ -840,7 +821,6 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
         price = st["price"]
         prev_close = st["prev_close"]
 
-    # ---- 1. HTF bias (2 pts) ----
     htf_bull = price >= prev_close
     htf_ok = (htf_bull and side == "BUY") or ((not htf_bull) and side == "SELL")
     if htf_ok:
@@ -857,7 +837,6 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
             "ar": f"اتجاه الإطار الأعلى ({'صاعد' if htf_bull else 'هابط'}) يتعارض مع {('الشراء' if side == 'BUY' else 'البيع')}",
         })
 
-    # ---- 2. Macro regime alignment (2 pts) ----
     mb = macro_bias_for_symbol(symbol)
     macro_ok = (mb == "bullish" and side == "BUY") or (mb == "bearish" and side == "SELL")
     if macro_ok:
@@ -874,19 +853,14 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
             "ar": f"النظام السوقي '{MACRO['regime']}' يعطي انطباعاً {('صاعد' if mb == 'bullish' else ('هابط' if mb == 'bearish' else 'محايد'))} لـ {symbol}",
         })
 
-    # ---- 3. DXY correlation (1 pt) ----
     with PRICE_LOCK:
         dxy_price = PRICES["DXY"]["price"]
         dxy_prev = PRICES["DXY"]["prev_close"]
     dxy_down = dxy_price < dxy_prev
     dxy_ok = False
-    if symbol in ("XAU/USD", "XAG/USD"):
+    if symbol in ("XAU/USD", "XAG/USD", "EUR/USD", "GBP/USD"):
         dxy_ok = (side == "BUY" and dxy_down) or (side == "SELL" and not dxy_down)
-    elif symbol in ("EUR/USD", "GBP/USD"):
-        dxy_ok = (side == "BUY" and dxy_down) or (side == "SELL" and not dxy_down)
-    elif symbol == "USD/JPY":
-        dxy_ok = (side == "BUY" and not dxy_down) or (side == "SELL" and dxy_down)
-    elif symbol == "DXY":
+    elif symbol in ("USD/JPY", "DXY"):
         dxy_ok = (side == "BUY" and not dxy_down) or (side == "SELL" and dxy_down)
     if dxy_ok:
         score += 1
@@ -902,7 +876,6 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
             "ar": f"اتجاه مؤشر الدولار يتعارض مع {('الشراء' if side == 'BUY' else 'البيع')} على {symbol}",
         })
 
-    # ---- 4. COT positioning (1 pt) ----
     cb = cot_bias_for_symbol(symbol)
     cot_ok = (cb == "bullish" and side == "BUY") or (cb == "bearish" and side == "SELL")
     if cot_ok:
@@ -919,7 +892,6 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
             "ar": f"مراكز المؤسسات (COT) {('صاعدة' if cb == 'bullish' else ('هابطة' if cb == 'bearish' else 'محايدة'))} على {symbol}",
         })
 
-    # ---- 5. VIX / risk regime (1 pt) ----
     vix = MACRO["vix"]
     if vix >= 25 and symbol in ("XAU/USD", "XAG/USD", "DXY") and side == "BUY":
         score += 1
@@ -942,7 +914,6 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
             "ar": f"VIX ({vix:.1f}) لا يوفر أفضلية اتجاهية",
         })
 
-    # ---- 6. Strategy edge (1 pt) ----
     wr = strategy_win_rate(strategy)
     if wr >= 60.0:
         score += 1
@@ -958,7 +929,6 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
             "ar": f"نسبة نجاح الاستراتيجية {wr:.1f}% أقل من 60%",
         })
 
-    # ---- 7. Kill Zone timing (1 pt) ----
     if is_kill_zone():
         score += 1
         reasons.append({
@@ -973,13 +943,10 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
             "ar": "خارج منطقة القتل — التوقيت غير مثالي",
         })
 
-    # ---- 8. Yield direction (1 pt) ----
     us10y = MACRO["us10y"]
     if symbol in ("XAU/USD", "XAG/USD"):
         y_ok = (side == "BUY" and us10y < 4.3) or (side == "SELL" and us10y > 4.4)
-    elif symbol == "USD/JPY":
-        y_ok = (side == "BUY" and us10y > 4.3) or (side == "SELL" and us10y < 4.2)
-    elif symbol == "DXY":
+    elif symbol in ("USD/JPY", "DXY"):
         y_ok = (side == "BUY" and us10y > 4.3) or (side == "SELL" and us10y < 4.2)
     else:
         y_ok = (side == "BUY" and us10y < 4.3) or (side == "SELL" and us10y > 4.3)
@@ -997,7 +964,6 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
             "ar": f"عائد السندات الأمريكية 10 سنوات ({us10y:.2f}%) يتعارض مع {('الشراء' if side == 'BUY' else 'البيع')}",
         })
 
-    # ---- 9. Strategy-specific ICT confluence (1 pt) ----
     strat_ict = {
         "Liquidity Sweep & Stop Hunt": True,
         "Fair Value Gap (FVG)": True,
@@ -1153,7 +1119,6 @@ def trade_evaluator() -> None:
                 try:
                     cur = c.cursor()
 
-                    # ---- Fill LIMIT orders ----
                     pending = cur.execute(
                         "SELECT * FROM trades WHERE status='PENDING' AND entry_type='LIMIT'"
                     ).fetchall()
@@ -1174,7 +1139,6 @@ def trade_evaluator() -> None:
                                 (now_iso(), t["id"])
                             )
 
-                    # ---- Evaluate ACTIVE ----
                     active = cur.execute("SELECT * FROM trades WHERE status='ACTIVE'").fetchall()
                     for t in active:
                         tid = t["id"]
@@ -1240,7 +1204,7 @@ def trade_evaluator() -> None:
 # ============================================================================
 class Handler(BaseHTTPRequestHandler):
 
-    server_version = "ProTradingEngine/3.0"
+    server_version = "ProTradingEngine/4.0"
 
     def log_message(self, fmt, *args):
         pass
@@ -1323,6 +1287,8 @@ class Handler(BaseHTTPRequestHandler):
                             "label_en": c["label_en"],
                             "label_ar": c["label_ar"],
                             "yahoo": c["yahoo"],
+                            "spot_code": c["spot_code"],
+                            "metals_spot": c["metals_spot"],
                         } for s, c in SYMBOLS.items()
                     },
                     "modes": TRADE_MODES,
@@ -1550,6 +1516,8 @@ class Handler(BaseHTTPRequestHandler):
                             "stale": st["stale"],
                             "last_update": st["last_update"],
                             "yahoo_ticker": c["yahoo"],
+                            "spot_code": c["spot_code"],
+                            "metals_spot": c["metals_spot"],
                         }
                 self._json({"ok": True, "data": data})
                 return
@@ -1705,7 +1673,7 @@ class Handler(BaseHTTPRequestHandler):
                 entry = round(live, dec)
 
                 if entry_type == "LIMIT":
-                    sl_probe, tp_probe = default_sl_tp(symbol, mode, side, entry)
+                    sl_probe, _ = default_sl_tp(symbol, mode, side, entry)
                     pull = abs(entry - sl_probe) * 0.35
                     if side == "BUY":
                         entry = round(entry - pull, dec)
@@ -1810,7 +1778,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": str(exc)}, 500)
 
 # ============================================================================
-# FRONTEND (BILINGUAL DARK-MODE DASHBOARD)
+# FRONTEND
 # ============================================================================
 INDEX_HTML = r"""<!DOCTYPE html>
 <html lang="en" dir="ltr">
@@ -1855,7 +1823,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
   ::-webkit-scrollbar-thumb:hover { background: #334155; }
   .glow-blue   { box-shadow: 0 0 26px -6px rgba(56,189,248,0.70); }
   .glow-green  { box-shadow: 0 0 26px -6px rgba(16,185,129,0.70); }
-  .glow-red    { box-shadow: 0 0 26px -6px rgba(244,63,94,0.70); }
   .stripe-row:nth-child(odd) { background: rgba(15,23,42,0.35); }
   .stripe-row:hover { background: rgba(30,64,175,0.14); }
   select, input { outline: none; }
@@ -1864,17 +1831,11 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .btn-primary:hover { filter: brightness(1.10); transform: translateY(-1px); }
   .btn-success { background: linear-gradient(135deg, #10b981 0%, #059669 100%); transition: transform .15s, filter .15s; }
   .btn-success:hover { filter: brightness(1.10); transform: translateY(-1px); }
-  .btn-amber { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); transition: transform .15s, filter .15s; }
-  .btn-amber:hover { filter: brightness(1.10); transform: translateY(-1px); }
   .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .03em; }
   .scroll-area { max-height: 480px; overflow-y: auto; }
   .feed-live { color: #34d399; }
   .feed-stale { color: #fbbf24; }
-  .score-ring {
-    background: conic-gradient(#10b981 var(--p), #1e293b 0);
-    border-radius: 9999px;
-    transition: background .35s ease;
-  }
+  .score-ring { background: conic-gradient(#10b981 var(--p), #1e293b 0); border-radius: 9999px; transition: background .35s ease; }
   .reason-pass { border-left: 3px solid #10b981; }
   .reason-fail { border-left: 3px solid #64748b; }
   html[dir="rtl"] .reason-pass { border-left: none; border-right: 3px solid #10b981; }
@@ -1889,7 +1850,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 via-blue-600 to-indigo-700 flex items-center justify-center font-black text-lg shadow-lg glow-blue">P</div>
       <div>
         <div class="text-[15px] font-bold tracking-tight text-white" data-i18n="app_title">Pro Trading &amp; Macro Intelligence</div>
-        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v3.0</div>
+        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v4.0</div>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -1916,16 +1877,14 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
 <main class="max-w-[1750px] mx-auto px-4 py-6 space-y-6">
 
-  <!-- ============ LIVE PRICE GRID ============ -->
   <section>
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-xs font-bold uppercase tracking-[0.22em] text-slate-400" data-i18n="live_market_feed">Live Market Feed</h2>
-      <div class="text-[10px] text-slate-500" data-i18n="feed_sub">Real Yahoo Finance feed · 1s visual ticks · 3s real refresh</div>
+      <div class="text-[10px] text-slate-500" data-i18n="feed_sub">Real spot feed (gold-api.com) + Yahoo Finance · no artificial noise</div>
     </div>
     <div id="priceGrid" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3"></div>
   </section>
 
-  <!-- ============ ACCOUNT + CONSOLE ============ -->
   <section class="grid grid-cols-1 xl:grid-cols-3 gap-4">
 
     <div class="card rounded-xl p-5">
@@ -2022,7 +1981,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- ============ CONFLUENCE PANEL ============ -->
   <section class="card rounded-xl p-5">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <h3 class="text-xs font-bold uppercase tracking-[0.22em] text-fuchsia-400" data-i18n="confluence_analysis">Technical × Macro Confluence Engine</h3>
@@ -2045,7 +2003,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- ============ ACTIVE POSITIONS ============ -->
   <section class="card rounded-xl overflow-hidden">
     <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
       <h3 class="text-xs font-bold uppercase tracking-[0.22em] text-emerald-400" data-i18n="active_positions">Active Positions</h3>
@@ -2074,7 +2031,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- ============ PENDING ============ -->
   <section class="card rounded-xl overflow-hidden">
     <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
       <h3 class="text-xs font-bold uppercase tracking-[0.22em] text-amber-400" data-i18n="pending_limit_orders">Pending Limit Orders</h3>
@@ -2103,7 +2059,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- ============ HISTORY ============ -->
   <section class="card rounded-xl overflow-hidden">
     <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
       <h3 class="text-xs font-bold uppercase tracking-[0.22em] text-slate-300" data-i18n="trade_history">Trade History</h3>
@@ -2133,7 +2088,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- ============ MACRO & GEOPOLITICS ============ -->
   <section class="card rounded-xl overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
       <h3 class="text-sm font-bold uppercase tracking-[0.22em] text-indigo-400" data-i18n="macro_geopolitics">Macro &amp; Geopolitics Intelligence</h3>
@@ -2249,7 +2203,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- ============ STRATEGY WIN RATES ============ -->
   <section class="card rounded-xl overflow-hidden">
     <div class="px-5 py-3 border-b border-slate-800">
       <h3 class="text-xs font-bold uppercase tracking-[0.22em] text-fuchsia-400" data-i18n="ict_win_rates">ICT Strategy Win Rates</h3>
@@ -2270,7 +2223,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- ============ SELF-LEARNING ============ -->
   <section class="card rounded-xl overflow-hidden">
     <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
       <h3 class="text-xs font-bold uppercase tracking-[0.22em] text-amber-400" data-i18n="ai_self_learning">AI Self-Learning Journal</h3>
@@ -2282,63 +2234,40 @@ INDEX_HTML = r"""<!DOCTYPE html>
 </main>
 
 <footer class="fixed bottom-0 left-0 right-0 text-center text-[10px] text-slate-600 bg-slate-950/85 border-t border-slate-800 py-2 z-30">
-  <span data-i18n="footer">Pro Trading &amp; Macro Intelligence Engine · Python stdlib · SQLite · Yahoo Finance feed</span> · © <span id="year"></span>
+  <span data-i18n="footer">Pro Trading &amp; Macro Intelligence Engine · Python stdlib · SQLite · gold-api.com + Yahoo Finance</span> · © <span id="year"></span>
 </footer>
 
 <script>
 // ===================================================================
-// I18N DICTIONARY
+// I18N
 // ===================================================================
 const I18N = {
   en: {
     app_title: "Pro Trading & Macro Intelligence",
-    app_subtitle: "Institutional ICT Engine · v3.0",
-    live: "LIVE",
-    stale: "SIMULATED",
-    session: "Session",
-    kill_zone: "Kill Zone",
-    capital: "Capital",
-    win_rate: "Win Rate",
-    active: "ACTIVE",
-    inactive: "INACTIVE",
+    app_subtitle: "Institutional ICT Engine · v4.0",
+    live: "LIVE", stale: "FALLBACK",
+    session: "Session", kill_zone: "Kill Zone", capital: "Capital", win_rate: "Win Rate",
+    active: "ACTIVE", inactive: "INACTIVE",
     live_market_feed: "Live Market Feed",
-    feed_sub: "Real Yahoo Finance feed · 1s visual ticks · 3s real refresh",
+    feed_sub: "Real spot feed (gold-api.com) + Yahoo Finance · no artificial noise",
     account_risk: "Account & Risk Control",
-    capital_usd: "Capital (USD)",
-    risk_per_trade: "Risk per Trade (%)",
+    capital_usd: "Capital (USD)", risk_per_trade: "Risk per Trade (%)",
     save_permanently: "Save Permanently",
-    risk_usd: "Risk $/trade",
-    total_trades: "Total trades",
-    active_pos: "Active",
-    pending_orders: "Pending",
-    realized_pnl: "Realized P&L",
+    risk_usd: "Risk $/trade", total_trades: "Total trades",
+    active_pos: "Active", pending_orders: "Pending", realized_pnl: "Realized P&L",
     trade_console: "Trade Console — Multi-Timeframe Execution",
-    symbol: "Symbol",
-    side: "Side",
-    buy: "BUY",
-    sell: "SELL",
-    entry_type: "Entry Type",
-    market: "MARKET",
-    limit: "LIMIT",
-    trade_mode: "Trade Mode",
-    entry_tf: "Entry Timeframe",
-    ict_strategy: "ICT Strategy",
-    entry_price: "Entry Price",
-    stop_loss: "Stop Loss",
-    take_profit: "Take Profit",
-    htf_analysis: "HTF Analysis",
-    lot_size: "Calculated Lot Size",
-    dispatch_trade: "⚡ Dispatch Trade",
-    auto_dispatch: "🤖 Auto Dispatch",
+    symbol: "Symbol", side: "Side", buy: "BUY", sell: "SELL",
+    entry_type: "Entry Type", market: "MARKET", limit: "LIMIT",
+    trade_mode: "Trade Mode", entry_tf: "Entry Timeframe", ict_strategy: "ICT Strategy",
+    entry_price: "Entry Price", stop_loss: "Stop Loss", take_profit: "Take Profit",
+    htf_analysis: "HTF Analysis", lot_size: "Calculated Lot Size",
+    dispatch_trade: "⚡ Dispatch Trade", auto_dispatch: "🤖 Auto Dispatch",
     confluence_analysis: "Technical × Macro Confluence Engine",
     confluence_sub: "ICT structure + Macro regime + COT + Timing",
-    active_positions: "Active Positions",
-    pending_limit_orders: "Pending Limit Orders",
-    trade_history: "Trade History",
-    last_50: "last 50 closed",
+    active_positions: "Active Positions", pending_limit_orders: "Pending Limit Orders",
+    trade_history: "Trade History", last_50: "last 50 closed",
     id: "ID", mode: "Mode", htf_entry: "HTF → Entry",
-    limit_entry: "Limit Entry", action: "Action",
-    close: "Close", cancel: "Cancel",
+    limit_entry: "Limit Entry", action: "Action", close: "Close", cancel: "Cancel",
     exit: "Exit", status: "Status", pnl: "P&L", closed: "Closed",
     strategy_col: "Strategy", total: "Total", wins: "Wins", losses: "Losses",
     confluence: "Confluence",
@@ -2360,80 +2289,51 @@ const I18N = {
     ai_self_learning: "AI Self-Learning Journal",
     clear_all: "Clear all",
     no_lessons: "No lessons yet — losses will appear here automatically",
-    no_active: "No active positions",
-    no_pending: "No pending limit orders",
+    no_active: "No active positions", no_pending: "No pending limit orders",
     no_history: "No closed trades yet",
-    footer: "Pro Trading & Macro Intelligence Engine · Python stdlib · SQLite · Yahoo Finance feed",
+    footer: "Pro Trading & Macro Intelligence Engine · Python stdlib · SQLite · gold-api.com + Yahoo Finance",
     bullish: "Bullish", bearish: "Bearish", neutral: "Neutral",
     strong: "Strong", moderate: "Moderate", weak: "Weak", avoid: "Avoid",
     approved: "APPROVED", rejected: "REJECTED",
     confluence_hint: "Adjust the console inputs to see live confluence scoring",
-    cot_source: "Source",
-    macro_bias: "Macro Bias",
-    minutes: "min",
-    days: "days",
-    next_meeting: "Next meeting",
+    cot_source: "Source", macro_bias: "Macro Bias",
+    days: "days", next_meeting: "Next meeting",
     cut: "Cut", hold: "Hold", hike: "Hike",
-    error_generic: "Error",
-    dispatch_ok: "Trade dispatched",
-    auto_ok: "Auto-dispatch",
-    settings_saved: "Settings saved permanently",
+    error_generic: "Error", dispatch_ok: "Trade dispatched",
+    auto_ok: "Auto-dispatch", settings_saved: "Settings saved permanently",
     settings_error: "Settings error",
     close_confirm: "Close this position at market?",
     cancel_confirm: "Cancel this pending order?",
     clear_confirm: "Clear all self-learning entries?",
-    risk_on: "Risk-On", risk_off: "Risk-Off",
-    crisis: "Crisis", neutral_constructive: "Neutral-Constructive",
+    risk_on: "Risk-On", risk_off: "Risk-Off", crisis: "Crisis",
+    neutral_constructive: "Neutral-Constructive",
   },
   ar: {
     app_title: "محرك التداول والذكاء الكلي الاحترافي",
-    app_subtitle: "محرك ICT المؤسسي · الإصدار 3.0",
-    live: "مباشر",
-    stale: "محاكاة",
-    session: "الجلسة",
-    kill_zone: "منطقة القتل",
-    capital: "رأس المال",
-    win_rate: "نسبة النجاح",
-    active: "نشط",
-    inactive: "غير نشط",
+    app_subtitle: "محرك ICT المؤسسي · الإصدار 4.0",
+    live: "مباشر", stale: "احتياطي",
+    session: "الجلسة", kill_zone: "منطقة القتل", capital: "رأس المال", win_rate: "نسبة النجاح",
+    active: "نشط", inactive: "غير نشط",
     live_market_feed: "تغذية السوق المباشرة",
-    feed_sub: "تغذية Yahoo Finance حقيقية · تحديث بصري كل ثانية · تحديث حقيقي كل 3 ثوانٍ",
+    feed_sub: "تغذية سبوت حقيقية (gold-api.com) + Yahoo Finance · بدون ضوضاء اصطناعية",
     account_risk: "الحساب وإدارة المخاطر",
-    capital_usd: "رأس المال (دولار)",
-    risk_per_trade: "المخاطرة لكل صفقة (%)",
+    capital_usd: "رأس المال (دولار)", risk_per_trade: "المخاطرة لكل صفقة (%)",
     save_permanently: "حفظ بشكل دائم",
-    risk_usd: "المخاطرة بالدولار/صفقة",
-    total_trades: "إجمالي الصفقات",
-    active_pos: "نشطة",
-    pending_orders: "معلقة",
-    realized_pnl: "الأرباح المحققة",
+    risk_usd: "المخاطرة بالدولار/صفقة", total_trades: "إجمالي الصفقات",
+    active_pos: "نشطة", pending_orders: "معلقة", realized_pnl: "الأرباح المحققة",
     trade_console: "منصة التداول — التنفيذ متعدد الأطر الزمنية",
-    symbol: "الرمز",
-    side: "الاتجاه",
-    buy: "شراء",
-    sell: "بيع",
-    entry_type: "نوع الدخول",
-    market: "سوق",
-    limit: "معلق",
-    trade_mode: "نمط التداول",
-    entry_tf: "إطار الدخول",
-    ict_strategy: "استراتيجية ICT",
-    entry_price: "سعر الدخول",
-    stop_loss: "وقف الخسارة",
-    take_profit: "جني الأرباح",
-    htf_analysis: "تحليل الأطر العليا",
-    lot_size: "حجم اللوت المحسوب",
-    dispatch_trade: "⚡ تنفيذ الصفقة",
-    auto_dispatch: "🤖 تنفيذ تلقائي",
+    symbol: "الرمز", side: "الاتجاه", buy: "شراء", sell: "بيع",
+    entry_type: "نوع الدخول", market: "سوق", limit: "معلق",
+    trade_mode: "نمط التداول", entry_tf: "إطار الدخول", ict_strategy: "استراتيجية ICT",
+    entry_price: "سعر الدخول", stop_loss: "وقف الخسارة", take_profit: "جني الأرباح",
+    htf_analysis: "تحليل الأطر العليا", lot_size: "حجم اللوت المحسوب",
+    dispatch_trade: "⚡ تنفيذ الصفقة", auto_dispatch: "🤖 تنفيذ تلقائي",
     confluence_analysis: "محرك التوافق الفني والكلي",
     confluence_sub: "هيكل ICT + النظام الكلي + COT + التوقيت",
-    active_positions: "الصفقات النشطة",
-    pending_limit_orders: "أوامر معلقة",
-    trade_history: "سجل الصفقات",
-    last_50: "آخر 50 صفقة مغلقة",
+    active_positions: "الصفقات النشطة", pending_limit_orders: "أوامر معلقة",
+    trade_history: "سجل الصفقات", last_50: "آخر 50 صفقة مغلقة",
     id: "المعرف", mode: "النمط", htf_entry: "الأعلى → الدخول",
-    limit_entry: "سعر الأمر المعلق", action: "إجراء",
-    close: "إغلاق", cancel: "إلغاء",
+    limit_entry: "سعر الأمر المعلق", action: "إجراء", close: "إغلاق", cancel: "إلغاء",
     exit: "الخروج", status: "الحالة", pnl: "الربح/الخسارة", closed: "مغلق",
     strategy_col: "الاستراتيجية", total: "الإجمالي", wins: "الأرباح", losses: "الخسائر",
     confluence: "التوافق",
@@ -2455,30 +2355,24 @@ const I18N = {
     ai_self_learning: "سجل التعلم الذاتي للذكاء الاصطناعي",
     clear_all: "مسح الكل",
     no_lessons: "لا توجد دروس بعد — ستظهر الدروس تلقائياً عند الخسائر",
-    no_active: "لا توجد صفقات نشطة",
-    no_pending: "لا توجد أوامر معلقة",
+    no_active: "لا توجد صفقات نشطة", no_pending: "لا توجد أوامر معلقة",
     no_history: "لا توجد صفقات مغلقة بعد",
-    footer: "محرك التداول والذكاء الكلي الاحترافي · Python stdlib · SQLite · تغذية Yahoo Finance",
+    footer: "محرك التداول والذكاء الكلي الاحترافي · Python stdlib · SQLite · gold-api.com + Yahoo Finance",
     bullish: "صاعد", bearish: "هابط", neutral: "محايد",
     strong: "قوي", moderate: "متوسط", weak: "ضعيف", avoid: "تجنب",
     approved: "معتمد", rejected: "مرفوض",
     confluence_hint: "عدّل مدخلات المنصة لرؤية تقييم التوافق المباشر",
-    cot_source: "المصدر",
-    macro_bias: "الانحياز الكلي",
-    minutes: "دقيقة",
-    days: "يوم",
-    next_meeting: "الاجتماع القادم",
+    cot_source: "المصدر", macro_bias: "الانحياز الكلي",
+    days: "يوم", next_meeting: "الاجتماع القادم",
     cut: "خفض", hold: "تثبيت", hike: "رفع",
-    error_generic: "خطأ",
-    dispatch_ok: "تم تنفيذ الصفقة",
-    auto_ok: "تنفيذ تلقائي",
-    settings_saved: "تم حفظ الإعدادات بشكل دائم",
+    error_generic: "خطأ", dispatch_ok: "تم تنفيذ الصفقة",
+    auto_ok: "تنفيذ تلقائي", settings_saved: "تم حفظ الإعدادات بشكل دائم",
     settings_error: "خطأ في الإعدادات",
     close_confirm: "إغلاق هذه الصفقة بسعر السوق؟",
     cancel_confirm: "إلغاء هذا الأمر المعلق؟",
     clear_confirm: "مسح جميع سجلات التعلم الذاتي؟",
-    risk_on: "شهية المخاطرة", risk_off: "النفور من المخاطرة",
-    crisis: "أزمة", neutral_constructive: "محايد إيجابي",
+    risk_on: "شهية المخاطرة", risk_off: "النفور من المخاطرة", crisis: "أزمة",
+    neutral_constructive: "محايد إيجابي",
   }
 };
 
@@ -2502,7 +2396,7 @@ const MODE_LABELS = {
 };
 
 // ===================================================================
-// STATE
+// STATIC CONFIG
 // ===================================================================
 const SYMBOLS = {
   "XAU/USD": { decimals: 2, mult: 100,    pip: 0.01,   label_en: "Gold",         label_ar: "الذهب" },
@@ -2540,12 +2434,23 @@ const DEFAULT_DISTS = {
   "_fx":     { SCALPING_A: [0.0012, 0.0024], SCALPING_B: [0.0020, 0.0040], SWING: [0.0060, 0.0180] },
 };
 
+// ===================================================================
+// STATE  (cache of every API response → language re-render uses this)
+// ===================================================================
 const state = {
   lang: "en",
   prices: {},
+  pricesSnapshot: null,
   settings: { capital: 10000, risk_percent: 1 },
-  lastConfluence: null,
+  summary: null,
+  trades: [],
+  strategies: [],
   macro: null,
+  cot: null,
+  cb: null,
+  calendar: [],
+  learning: [],
+  lastConfluence: null,
 };
 
 // ===================================================================
@@ -2630,7 +2535,7 @@ function sparkline(history) {
 }
 
 // ===================================================================
-// LANGUAGE
+// LANGUAGE  (synchronous full re-render)
 // ===================================================================
 function applyLanguage() {
   const dict = I18N[state.lang];
@@ -2638,28 +2543,33 @@ function applyLanguage() {
   document.documentElement.dir = isAr() ? "rtl" : "ltr";
   document.getElementById("btnLang").textContent = isAr() ? "🌐 عربي" : "🌐 English";
 
+  // Static i18n
   document.querySelectorAll("[data-i18n]").forEach(el => {
     const key = el.getAttribute("data-i18n");
     if (dict[key] !== undefined) el.textContent = dict[key];
   });
-  document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
-    const key = el.getAttribute("data-i18n-placeholder");
-    if (dict[key] !== undefined) el.placeholder = dict[key];
-  });
 
-  // Rebuild dynamic selects with translated labels
+  // Rebuild every dynamic select
   rebuildSymbolSelect();
   rebuildStrategySelect();
   rebuildModeSelect();
+  refreshEntryTFOptions();
 
-  // Re-render dynamic tables
-  pollStrategies();
-  pollCOT();
-  pollCB();
-  pollCalendar();
-  pollLearning();
+  // Re-render everything from cache (synchronous, no async race)
+  if (state.pricesSnapshot) renderPrices(state.pricesSnapshot);
+  if (state.summary) renderSummary(state.summary);
+  if (state.trades.length) {
+    renderActive(state.trades);
+    renderPending(state.trades);
+    renderHistory(state.trades);
+  }
+  if (state.strategies.length) renderStrategies(state.strategies);
+  if (state.macro) renderMacro(state.macro);
+  if (state.cot) renderCOT(state.cot);
+  if (state.cb) renderCB(state.cb);
+  if (state.calendar.length) renderCalendar(state.calendar);
+  if (state.learning.length) renderLearning(state.learning);
   if (state.lastConfluence) renderConfluence(state.lastConfluence);
-  refreshConfluence();
 }
 function toggleLanguage() {
   state.lang = isAr() ? "en" : "ar";
@@ -2692,7 +2602,6 @@ function rebuildModeSelect() {
     `<option value="${m}">${escapeHtml(modeLabel(m))}</option>`
   ).join("");
   sel.value = current;
-  refreshEntryTFOptions();
   refreshHTFDisplay();
 }
 
@@ -2703,6 +2612,7 @@ function renderPrices(data) {
   const grid = document.getElementById("priceGrid");
   let html = "";
   let liveCount = 0;
+  const total = Object.keys(data).length;
   for (const sym in data) {
     const p = data[sym];
     if (!p.stale) liveCount++;
@@ -2729,7 +2639,7 @@ function renderPrices(data) {
         </div>
         <div class="mt-1">${sparkline(p.history)}</div>
         <div class="text-[9px] mt-1 flex items-center justify-between">
-          <span class="${srcCls}">● ${srcTxt}</span>
+          <span class="${srcCls}">● ${srcTxt} · ${escapeHtml(p.source || "")}</span>
           <span class="text-slate-600">${escapeHtml(symLabel(sym))}</span>
         </div>
       </div>`;
@@ -2737,10 +2647,13 @@ function renderPrices(data) {
   }
   grid.innerHTML = html;
 
-  const total = Object.keys(data).length;
-  document.getElementById("feedStatus").textContent = liveCount === total ? t("live") : `${liveCount}/${total} ${t("live")}`;
-  document.getElementById("feedStatus").className = liveCount > 0 ? "text-emerald-300 font-semibold" : "text-amber-300 font-semibold";
-  document.getElementById("feedDot").className = liveCount > 0 ? "text-emerald-400 pulse-dot w-2 h-2 rounded-full bg-emerald-400" : "text-amber-400 w-2 h-2 rounded-full bg-amber-400";
+  document.getElementById("feedStatus").textContent =
+    liveCount === total ? t("live") : `${liveCount}/${total} ${t("live")}`;
+  document.getElementById("feedStatus").className =
+    liveCount > 0 ? "text-emerald-300 font-semibold" : "text-amber-300 font-semibold";
+  document.getElementById("feedDot").className =
+    liveCount > 0 ? "text-emerald-400 pulse-dot w-2 h-2 rounded-full bg-emerald-400"
+                  : "text-amber-400 w-2 h-2 rounded-full bg-amber-400";
 }
 
 // ===================================================================
@@ -2924,7 +2837,6 @@ function renderStrategies(list) {
 // MACRO + COT + CB + CALENDAR
 // ===================================================================
 function renderMacro(d) {
-  state.macro = d;
   document.getElementById("macroVix").textContent = Number(d.vix).toFixed(2);
   document.getElementById("macro10y").textContent = Number(d.us10y).toFixed(3) + "%";
   document.getElementById("macroDxy").textContent = Number(d.dxy).toFixed(3);
@@ -2945,21 +2857,18 @@ function renderMacro(d) {
   document.getElementById("geoBar").style.width = Math.min(100, Number(d.geo_risk)) + "%";
   document.getElementById("geoLabel").textContent = d.geo_risk_label;
 
-  // Macro bias engine panel
   const macroBias = computeClientMacroBias(d);
   const biasEl = document.getElementById("macroBiasList");
-  const biasRows = Object.keys(macroBias).map(sym => {
+  biasEl.innerHTML = Object.keys(macroBias).map(sym => {
     const b = macroBias[sym];
     const cls = b === "bullish" ? "text-emerald-300" : b === "bearish" ? "text-rose-300" : "text-slate-400";
     const label = b === "bullish" ? t("bullish") : b === "bearish" ? t("bearish") : t("neutral");
     return `<div class="flex justify-between"><span class="text-slate-400">${escapeHtml(sym)}</span><span class="${cls} font-bold">${label}</span></div>`;
   }).join("");
-  biasEl.innerHTML = biasRows;
 }
 
 function computeClientMacroBias(d) {
   const regime = d.regime;
-  const vix = Number(d.vix);
   const us10y = Number(d.us10y);
   const dxyRising = Number(d.dxy) >= Number(d.dxy_prev);
   const out = {};
@@ -3087,8 +2996,7 @@ function renderConfluence(c) {
   document.getElementById("confluenceScore").textContent = score;
 
   const verdict = document.getElementById("confluenceVerdict");
-  const verdictKey = c.approved ? "approved" : "rejected";
-  verdict.textContent = t(verdictKey) + " · " + t(c.bias);
+  verdict.textContent = t(c.approved ? "approved" : "rejected") + " · " + t(c.bias);
   verdict.className = "text-[11px] mt-2 font-bold " + (c.approved ? "text-emerald-400" : "text-rose-400");
 
   document.getElementById("confluenceHeadline").textContent = isAr() ? c.headline_ar : c.headline_en;
@@ -3115,9 +3023,7 @@ async function refreshConfluence() {
   try {
     const r = await api(`/api/confluence?symbol=${encodeURIComponent(sym)}&side=${encodeURIComponent(side)}&mode=${encodeURIComponent(mode)}&strategy=${encodeURIComponent(strat)}`);
     renderConfluence(r.data);
-  } catch (e) {
-    console.error("confluence:", e);
-  }
+  } catch (e) { console.error("confluence:", e); }
 }
 
 // ===================================================================
@@ -3256,11 +3162,12 @@ async function clearLearning() {
 }
 
 // ===================================================================
-// POLLING
+// POLLING  (cache every result into state before rendering)
 // ===================================================================
 async function pollPrices() {
   try {
     const r = await api("/api/prices");
+    state.pricesSnapshot = r.data;
     renderPrices(r.data);
     if (document.getElementById("selEntryType").value === "MARKET") {
       const sym = document.getElementById("selSymbol").value;
@@ -3273,31 +3180,39 @@ async function pollPrices() {
   } catch (e) { console.error("prices:", e); }
 }
 async function pollSummary() {
-  try { const r = await api("/api/summary"); renderSummary(r.data); } catch (e) { console.error(e); }
+  try { const r = await api("/api/summary"); state.summary = r.data; renderSummary(r.data); }
+  catch (e) { console.error(e); }
 }
 async function pollTrades() {
   try {
     const r = await api("/api/trades?limit=300");
+    state.trades = r.data;
     renderActive(r.data); renderPending(r.data); renderHistory(r.data);
   } catch (e) { console.error(e); }
 }
 async function pollStrategies() {
-  try { const r = await api("/api/strategies"); renderStrategies(r.data); } catch (e) { console.error(e); }
+  try { const r = await api("/api/strategies"); state.strategies = r.data; renderStrategies(r.data); }
+  catch (e) { console.error(e); }
 }
 async function pollMacro() {
-  try { const r = await api("/api/macro"); renderMacro(r.data); } catch (e) { console.error(e); }
+  try { const r = await api("/api/macro"); state.macro = r.data; renderMacro(r.data); }
+  catch (e) { console.error(e); }
 }
 async function pollCOT() {
-  try { const r = await api("/api/cot"); renderCOT(r.data); } catch (e) { console.error(e); }
+  try { const r = await api("/api/cot"); state.cot = r.data; renderCOT(r.data); }
+  catch (e) { console.error(e); }
 }
 async function pollCB() {
-  try { const r = await api("/api/central_banks"); renderCB(r.data); } catch (e) { console.error(e); }
+  try { const r = await api("/api/central_banks"); state.cb = r.data; renderCB(r.data); }
+  catch (e) { console.error(e); }
 }
 async function pollCalendar() {
-  try { const r = await api("/api/calendar"); renderCalendar(r.data); } catch (e) { console.error(e); }
+  try { const r = await api("/api/calendar"); state.calendar = r.data; renderCalendar(r.data); }
+  catch (e) { console.error(e); }
 }
 async function pollLearning() {
-  try { const r = await api("/api/self_learning?limit=40"); renderLearning(r.data); } catch (e) { console.error(e); }
+  try { const r = await api("/api/self_learning?limit=40"); state.learning = r.data; renderLearning(r.data); }
+  catch (e) { console.error(e); }
 }
 
 // ===================================================================
@@ -3305,16 +3220,12 @@ async function pollLearning() {
 // ===================================================================
 async function boot() {
   document.getElementById("year").textContent = new Date().getFullYear();
-
-  // Language
   document.getElementById("btnLang").addEventListener("click", toggleLanguage);
 
-  // Build selects
   rebuildSymbolSelect();
   rebuildStrategySelect();
   rebuildModeSelect();
 
-  // Event listeners
   document.getElementById("selSymbol").addEventListener("change", applyDefaults);
   document.getElementById("selSide").addEventListener("change", applyDefaults);
   document.getElementById("selMode").addEventListener("change", () => {
@@ -3331,7 +3242,6 @@ async function boot() {
   document.getElementById("btnAutoDispatch").addEventListener("click", dispatchAuto);
   document.getElementById("btnClearLearn").addEventListener("click", clearLearning);
 
-  // Initial fetches
   await Promise.all([
     pollPrices(), pollSummary(), pollStrategies(),
     pollMacro(), pollCOT(), pollCB(), pollCalendar(),
@@ -3340,8 +3250,7 @@ async function boot() {
   applyDefaults();
   refreshConfluence();
 
-  // Intervals
-  setInterval(pollPrices, 1000);
+  setInterval(pollPrices, 2000);
   setInterval(pollSummary, 3000);
   setInterval(pollTrades, 2500);
   setInterval(pollStrategies, 5000);
@@ -3374,13 +3283,12 @@ def main():
     print(f"[startup] Listening on http://{HOST}:{PORT}", flush=True)
 
     threads = [
-        threading.Thread(target=real_feed_loop,      daemon=True, name="real_feed"),
-        threading.Thread(target=micro_tick_loop,     daemon=True, name="micro_tick"),
-        threading.Thread(target=day_rollover_loop,   daemon=True, name="rollover"),
-        threading.Thread(target=macro_fetch_loop,    daemon=True, name="macro"),
-        threading.Thread(target=central_bank_loop,   daemon=True, name="cb"),
-        threading.Thread(target=cot_loop,            daemon=True, name="cot"),
-        threading.Thread(target=trade_evaluator,     daemon=True, name="evaluator"),
+        threading.Thread(target=price_feed_loop,   daemon=True, name="price_feed"),
+        threading.Thread(target=day_rollover_loop, daemon=True, name="rollover"),
+        threading.Thread(target=macro_fetch_loop,  daemon=True, name="macro"),
+        threading.Thread(target=central_bank_loop, daemon=True, name="cb"),
+        threading.Thread(target=cot_loop,          daemon=True, name="cot"),
+        threading.Thread(target=trade_evaluator,   daemon=True, name="evaluator"),
     ]
     for th in threads:
         th.start()
