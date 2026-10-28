@@ -17,7 +17,7 @@ HTML_DASHBOARD = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Trading & Macro Intelligence Engine - Persistent Pro</title>
+    <title>Pro Trading & Macro Intelligence Engine - Final Absolute Fix</title>
     <style>
         :root { --bg-color: #0b0f19; --card-bg: #1e293b; --text-color: #f8fafc; --accent: #38bdf8; --border: #334155; --success: #10b981; --danger: #f43f5e; --warning: #f59e0b; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
@@ -74,7 +74,7 @@ HTML_DASHBOARD = """
             <div class="info-bar">
                 <div class="info-item">👨‍💻 المطوّر: <b>ENG: Abdulelah Sadeq</b></div>
                 <div class="info-item">📊 رأس المال: <b id="lbl-capital">$1000.00</b> | المخاطرة: <b id="lbl-risk">1.0%</b></div>
-                <div class="info-item">🤖 التشغيل التلقائي: <b id="lbl-dispatch">🟢 مفعل (محفوظ ومستقر)</b></div>
+                <div class="info-item">🤖 التشغيل التلقائي: <b id="lbl-dispatch">🟢 مفعل (محفوظ ودقيق)</b></div>
                 <div class="info-item">⚡ النمط الافتراضي: <b id="lbl-style">سكالبينج (Scalp)</b></div>
                 <div class="info-item">🔴 الاستراتيجية الفعالة: <b id="lbl-active-strat">--</b></div>
             </div>
@@ -85,7 +85,7 @@ HTML_DASHBOARD = """
             <span id="market-status-text">⏳ جاري فحص حالة الأسواق العالمية (توقيت اليمن)...</span>
         </div>
 
-        <!-- الأسعار الحية المطابقة تماماً للشارت -->
+        <!-- الأسعار الحية المطابقة بدقة للشارت (خانتين و أربع خانات عشرية) -->
         <div class="grid">
             <div class="card">
                 <h3>🪙 الذهب (XAU/USD)</h3>
@@ -116,7 +116,7 @@ HTML_DASHBOARD = """
             <button class="btn" onclick="toggleSection('sec-risk')">⚙️ تعديل رأس المال والمخاطرة الفورية</button>
         </div>
 
-        <!-- 1. التقرير الاقتصادي والأساسي البحت (كامل وغير منقوص) -->
+        <!-- 1. التقرير الاقتصادي والأساسي البحت (كامل غير منقوص) -->
         <div id="sec-macro" class="section-box">
             <h3>🌐 التقرير الاقتصادي والأساسي البحت والمصادر المعتمدة</h3>
             <p style="color:#94a3b8; font-size:12px;">المصادر المعتمدة: <b>CFTC & COT Reports, Investing.com, Forex Factory, FXDailyReport</b></p>
@@ -175,7 +175,7 @@ HTML_DASHBOARD = """
                     </select>
                 </div>
             </div>
-            <button class="btn btn-active" onclick="executeCombinedTrade()">تنفيذ الصفقة المدمجة بالنمط والفريمات المختارة وحساب المخاطر بدقة 🎯</button>
+            <button class="btn btn-active" onclick="executeCombinedTrade()">تنفيذ الصفقة المدمجة برأس المال المحدث ونسبة المخاطرة 🎯</button>
             <div id="combined-result" style="background:#0f172a; padding:15px; border-radius:8px; border:1px solid var(--border); margin-top:15px; display:none; font-size:13px; line-height:1.6;"></div>
         </div>
 
@@ -193,19 +193,19 @@ HTML_DASHBOARD = """
             <div id="strategies-container"></div>
         </div>
 
-        <!-- 5. تعديل رأس المال والمخاطرة (محفوظة في القاعدة) -->
+        <!-- 5. تعديل رأس المال والمخاطرة (محفوظة في قاعدة البيانات) -->
         <div id="sec-risk" class="section-box">
-            <h3>⚙️ تعديل رأس المال ونسبة المخاطرة الفورية</h3>
+            <h3>⚙️ تعديل رأس المال والمخاطرة الفورية</h3>
             <form onsubmit="saveRiskConfig(event)" style="max-width: 400px;">
                 <label>رأس المال ($):</label>
                 <input type="number" id="inp-capital" step="0.01" required>
                 <label style="margin-top:10px;">نسبة المخاطرة لكل صفقة (%):</label>
                 <input type="number" id="inp-risk" step="0.01" required>
-                <button class="btn btn-active" style="width:100%; margin-top:15px;">حفظ التعديلات فوراً</button>
+                <button class="btn btn-active" style="width:100%; margin-top:15px;">حفظ التعديلات في قاعدة البيانات فوراً</button>
             </form>
         </div>
 
-        <!-- سجل الصفقات (محفوظ بشكل دائم) -->
+        <!-- سجل الصفقات (محفوظ ومستقر) -->
         <div class="card">
             <h3>📊 سجل الصفقات الذكية ومتابعة النجاح أو الخسارة (محفوظ دائماً)</h3>
             <div style="overflow-x: auto;">
@@ -265,7 +265,7 @@ HTML_DASHBOARD = """
 
                     document.getElementById('lbl-capital').innerText = '$' + data.settings.capital.toFixed(2);
                     document.getElementById('lbl-risk').innerText = data.settings.risk_pct + '%';
-                    document.getElementById('lbl-dispatch').innerText = data.settings.auto_dispatch_active ? '🟢 مفعل (محفوظ ومستقر)' : '🔴 متوقف';
+                    document.getElementById('lbl-dispatch').innerText = data.settings.auto_dispatch_active ? '🟢 مفعل (محفوظ ودقيق)' : '🔴 متوقف';
                     document.getElementById('lbl-style').innerText = data.settings.preferred_style === 'scalp' ? 'سكالبينج (Scalp)' : 'سوينج (Swing)';
                     document.getElementById('lbl-active-strat').innerText = data.settings.active_weekly_strategy;
 
@@ -358,7 +358,7 @@ HTML_DASHBOARD = """
             })
             .then(res => res.json())
             .then(data => {
-                alert('✅ تم حفظ وتحديث رأس المال ونسبة المخاطرة في قاعدة البيانات بنجاح!');
+                alert('✅ تم حفظ رأس المال ونسبة المخاطرة في قاعدة البيانات بنجاح تام!');
                 updateDashboard();
             });
         }
@@ -375,10 +375,10 @@ HTML_DASHBOARD = """
             .then(data => {
                 let box = document.getElementById('combined-result');
                 box.style.display = 'block';
-                box.innerHTML = `<b>🎯 تم تفعيل وحفظ الصفقة بنجاح:</b><br>
+                box.innerHTML = `<b>🎯 تم تفعيل وحفظ الصفقة بنجاح بناءً على رأس المال المحدث:</b><br>
                 • الأصل: <b>${data.asset}</b> | النمط: <b>${data.style}</b> | الاتجاه: <b>${data.direction}</b><br>
                 • الفريمات الفنية المستخدمة: <code style="color:var(--accent);">${data.timeframes}</code><br>
-                • حجم العقد (Lot): <b style="color:var(--success);">${data.lot} Lot</b> (المخاطرة: $${data.risk_amt})<br>
+                • حجم العقد (Lot): <b style="color:var(--success);">${data.lot} Lot</b> (المخاطرة الفورية: $${data.risk_amt})<br>
                 • الدخول: <code>${data.entry}</code> | SL: <code style="color:red;">${data.sl}</code> | TP: <code style="color:green;">${data.tp}</code>`;
                 updateDashboard();
             });
@@ -407,7 +407,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
             conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
             cursor = conn.cursor()
             
-            # جلب إعدادات رأس المال والمخاطرة المحفوظة من قاعدة البيانات
+            # قراءة رأس المال ونسبة المخاطرة من جدول الإعدادات الدائم
             cursor.execute("SELECT value FROM bot_settings WHERE key = 'capital'")
             row_cap = cursor.fetchone()
             if row_cap: bot_settings['capital'] = float(row_cap[0])
@@ -522,7 +522,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         pass
 
 # ==========================================
-# 2. الثوابت وإعدادات النظام وتطابق الأسعار الحية الدقيقة
+# 2. الثوابت وإعدادات النظام ومحرك التطابق اللحظي للشارت
 # ==========================================
 ICT_STRATEGIES = [
     "1. FVG Mitigation (تخفيف الفجوات العادلة)",
@@ -542,7 +542,7 @@ bot_settings = {
     'active_weekly_strategy': ICT_STRATEGIES[0]
 }
 
-# أسعار حقيقية مطابقة تماماً للشارت الحقيقي
+# أسعار حقيقية مطابقة للشارت بدقة خانتين وأربع خانات عشرية
 live_market_cache = {
     'XAUUSD': 4062.87,
     'EURUSD': 1.1129,
@@ -598,7 +598,6 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # جدول لحفظ الإعدادات بشكل دائم (رأس المال والمخاطرة) لتجنب ضياعها
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bot_settings (
             key TEXT PRIMARY KEY,
@@ -613,7 +612,6 @@ init_db()
 def fetch_live_market_data():
     global live_market_cache
     try:
-        # جلب الذهب المباشر ومطابقته بدقة للشارت
         req_obj = urllib.request.Request("https://api.gold-api.com/price/XAU", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req_obj, timeout=3) as response:
             gold_data = json.loads(response.read().decode('utf-8'))
@@ -624,7 +622,6 @@ def fetch_live_market_data():
         pass
 
     try:
-        # جلب وتحديث العملات الحية (EUR/USD, GBP/USD) ومؤشر DXY لتتطابق تماماً مع الشارت
         forex_req = urllib.request.Request("https://open.er-api.com/v6/latest/USD", headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(forex_req, timeout=3) as f_res:
             f_data = json.loads(f_res.read().decode('utf-8'))
@@ -644,10 +641,10 @@ def fetch_live_market_data():
     return live_market_cache
 
 def background_engine():
-    print("🚀 Pro Macro & ICT Engine running 24/7 with Persistent Storage & Perfect Sync...")
+    print("🚀 Pro Macro & ICT Engine running 24/7 with Absolute Persistence & Price Sync...")
     while True:
         try:
-            time.sleep(1) # تحديث لحظي سريع ومتزامن
+            time.sleep(1)
             fetch_live_market_data()
             
             m_status = get_market_status()
@@ -655,7 +652,15 @@ def background_engine():
             conn = sqlite3.connect("trading_bot_memory.db", check_same_thread=False)
             cursor = conn.cursor()
             
-            # منع فتح صفقة جديدة تلقائياً طالما توجد صفقة قيد المراقبة (PENDING_EVALUATION)
+            # استرجاع رأس المال والمخاطرة المحدثة من قاعدة البيانات للمحرك الخلفي
+            cursor.execute("SELECT value FROM bot_settings WHERE key = 'capital'")
+            rc = cursor.fetchone()
+            current_cap = float(rc[0]) if rc else bot_settings['capital']
+
+            cursor.execute("SELECT value FROM bot_settings WHERE key = 'risk_pct'")
+            rr = cursor.fetchone()
+            current_risk_pct = float(rr[0]) if rr else bot_settings['risk_pct']
+
             cursor.execute("SELECT COUNT(*) FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
             active_trades_count = cursor.fetchone()[0]
             
@@ -664,10 +669,8 @@ def background_engine():
                 strat = bot_settings['active_weekly_strategy']
                 style = bot_settings['preferred_style']
                 price = live_market_cache.get(chosen_asset, 2800.0)
-                cap = bot_settings['capital']
-                risk_pct = bot_settings['risk_pct']
-                risk_amt = cap * (risk_pct / 100.0)
                 
+                risk_amt = current_cap * (current_risk_pct / 100.0)
                 stop_pips = 12.0 if style == 'scalp' else 45.0
                 diff = stop_pips * (0.1 if chosen_asset == "XAUUSD" else 0.0010)
                 lot = round(risk_amt / (diff * (100 if chosen_asset == "XAUUSD" else 10000)), 2) or 0.01
@@ -686,7 +689,6 @@ def background_engine():
                 """, (chosen_asset, style.upper(), strat, lot, risk_amt, direction, price, sl, tp, live_market_cache['DXY']))
                 conn.commit()
 
-            # متابعة وتقييم الصفقات المعلقة وتفعيل التعلم الذاتي عند الخسارة
             cursor.execute("SELECT id, asset, strategy_used, entry, sl, tp, direction FROM ai_ultimate_trades WHERE result = 'PENDING_EVALUATION'")
             pending = cursor.fetchall()
             
