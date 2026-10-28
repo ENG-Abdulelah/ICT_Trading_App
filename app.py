@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Pro Trading & Macro Intelligence Engine v4.0
+Pro Trading & Macro Intelligence Engine v4.1
 =============================================
 Single-file production server (Python stdlib only).
 
-Price accuracy strategy:
-  • XAU/USD & XAG/USD  →  gold-api.com (keyless, real SPOT, no futures basis)
-  • EUR/USD GBP/USD USD/JPY DXY  →  Yahoo Finance v8 (regularMarketPrice, no delay injection)
-  • Absolute fallback  →  Yahoo Finance (GC=F / SI=F) only if spot source is down
-  • NO micro-tick noise, NO random walk, NO drift. Prices are exactly what the source returns.
+Price accuracy:
+  • XAU/USD & XAG/USD → gold-api.com (keyless, real SPOT)
+  • EUR/USD GBP/USD USD/JPY DXY → Yahoo Finance v8 (regularMarketPrice)
+  • Out-of-bounds rejection — never accept a fake tick
+  • NO micro-tick noise, NO random walk, NO drift
 
 Bilingual UI:
-  • applyLanguage() re-renders every dynamic table, select and label from cached
-    state synchronously — no async race, no failure, no reload.
+  • applyLanguage() re-renders synchronously from cached state.
+  • Every render call wrapped in try/catch — a single failure can't break the toggle.
+
+Footer:
+  • About Engine · Developer Credit · User Guide — full AR/EN.
 
 Run:   python app.py
 Port:  $PORT (default 8000)
@@ -33,7 +36,6 @@ from datetime import datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 
 # ============================================================================
 # CONFIGURATION
@@ -57,9 +59,6 @@ HTTP_TIMEOUT = 7.0
 # ============================================================================
 # SYMBOL UNIVERSE
 # ============================================================================
-# NOTE:
-#   • metals_spot=True → fetch from gold-api.com (true spot, no futures basis)
-#   • metals_spot=False → fetch from Yahoo Finance v8 (regularMarketPrice)
 SYMBOLS = {
     "XAU/USD": {
         "yahoo": "GC=F", "spot_code": "XAU", "metals_spot": True,
@@ -97,6 +96,18 @@ SYMBOLS = {
         "pip": 0.01, "spread": 0.020,
         "label_en": "Dollar Index", "label_ar": "مؤشر الدولار",
     },
+}
+
+# ============================================================================
+# PRICE SANITY BOUNDS — reject obviously-fake ticks (no drift, no bad data)
+# ============================================================================
+PRICE_BOUNDS = {
+    "XAU/USD": (1000.0, 6000.0),
+    "XAG/USD": (5.0, 200.0),
+    "EUR/USD": (0.50, 2.00),
+    "GBP/USD": (0.70, 2.50),
+    "USD/JPY": (70.0, 300.0),
+    "DXY":     (70.0, 140.0),
 }
 
 # ============================================================================
@@ -481,10 +492,10 @@ def init_db() -> None:
             c.close()
 
 # ============================================================================
-# PRICE FETCHERS — ACCURATE, NO NOISE
+# PRICE FETCHERS — ACCURATE, NO NOISE, BOUNDS CHECKED
 # ============================================================================
 def fetch_metals_spot(spot_code: str):
-    """True spot price from gold-api.com (keyless). Returns (price, None, None, None)."""
+    """True spot from gold-api.com (keyless). Returns (price, None, None, None)."""
     url = f"https://api.gold-api.com/price/{spot_code}"
     req = Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     with urlopen(req, timeout=HTTP_TIMEOUT) as resp:
@@ -495,7 +506,7 @@ def fetch_metals_spot(spot_code: str):
     return float(price), None, None, None
 
 def fetch_yahoo_quote(ticker: str):
-    """Yahoo Finance v8 — returns (price, prev_close, day_high, day_low) from meta."""
+    """Yahoo Finance v8 — returns (price, prev_close, day_high, day_low)."""
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
            f"{ticker}?interval=1m&range=1d")
     req = Request(url, headers={
@@ -526,9 +537,14 @@ def fetch_yahoo_quote(ticker: str):
         float(low) if low is not None else None,
     )
 
-def apply_tick(sym: str, price: float, prev_close, day_high, day_low, source: str) -> None:
-    """Apply a real market tick exactly as received — no noise, no drift."""
+def apply_tick(sym: str, price: float, prev_close, day_high, day_low, source: str) -> bool:
+    """Validate against bounds, then apply exactly as received — no noise."""
     cfg = SYMBOLS[sym]
+    bounds = PRICE_BOUNDS.get(sym, (0.000001, 1e12))
+    lo, hi = bounds
+    if not (lo <= price <= hi):
+        print(f"[price] {sym} REJECTED out-of-bounds price {price} (allowed {lo}-{hi})", flush=True)
+        return False
     with PRICE_LOCK:
         st = PRICES[sym]
         st["prev_price"] = st["price"]
@@ -548,20 +564,22 @@ def apply_tick(sym: str, price: float, prev_close, day_high, day_low, source: st
         h.append(st["price"])
         if len(h) > 120:
             h.pop(0)
+    return True
 
 def fetch_all_prices() -> None:
-    """One full refresh cycle across all symbols."""
     for sym, cfg in SYMBOLS.items():
         try:
             if cfg["metals_spot"]:
                 try:
                     price, _, _, _ = fetch_metals_spot(cfg["spot_code"])
-                    apply_tick(sym, price, None, None, None, "gold-api-spot")
-                    continue
+                    if apply_tick(sym, price, None, None, None, "gold-api-spot"):
+                        print(f"[price] {sym} = {price:.{cfg['decimals']}f}  (gold-api-spot)", flush=True)
+                        continue
                 except Exception as spot_exc:
                     print(f"[price] {sym} spot failed ({spot_exc}) — falling back to Yahoo", flush=True)
             price, prev_close, hi, lo = fetch_yahoo_quote(cfg["yahoo"])
-            apply_tick(sym, price, prev_close, hi, lo, "yahoo")
+            if apply_tick(sym, price, prev_close, hi, lo, "yahoo"):
+                print(f"[price] {sym} = {price:.{cfg['decimals']}f}  (yahoo)", flush=True)
         except Exception as exc:
             print(f"[price] {sym} fetch failed: {exc}", flush=True)
 
@@ -593,7 +611,6 @@ def day_rollover_loop() -> None:
 # ============================================================================
 def macro_fetch_loop() -> None:
     while not SHUTDOWN.is_set():
-        # VIX
         try:
             vix_price, _, _, _ = fetch_yahoo_quote("%5EVIX")
             with MACRO_LOCK:
@@ -601,7 +618,6 @@ def macro_fetch_loop() -> None:
         except Exception as exc:
             print(f"[macro] VIX fetch failed: {exc}", flush=True)
 
-        # US 10Y
         try:
             tnx_price, _, _, _ = fetch_yahoo_quote("%5ETNX")
             us10y = tnx_price / 10.0 if tnx_price > 10.0 else tnx_price
@@ -650,7 +666,7 @@ def central_bank_loop() -> None:
         SHUTDOWN.wait(8.0)
 
 # ============================================================================
-# COT FETCH (FuturesBench keyless JSON)
+# COT FETCH
 # ============================================================================
 COT_KEY_CANDIDATES = {
     "Gold":   ["gold", "gold-futures", "comex-gold"],
@@ -709,7 +725,7 @@ def cot_loop() -> None:
         SHUTDOWN.wait(300.0)
 
 # ============================================================================
-# ECONOMIC CALENDAR BUILDER
+# CALENDAR BUILDER
 # ============================================================================
 def build_calendar() -> list:
     now = datetime.now(timezone.utc)
@@ -1204,7 +1220,7 @@ def trade_evaluator() -> None:
 # ============================================================================
 class Handler(BaseHTTPRequestHandler):
 
-    server_version = "ProTradingEngine/4.0"
+    server_version = "ProTradingEngine/4.1"
 
     def log_message(self, fmt, *args):
         pass
@@ -1257,7 +1273,6 @@ class Handler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
 
-    # ------------------------------------------------------------------ GET
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
@@ -1273,6 +1288,7 @@ class Handler(BaseHTTPRequestHandler):
                     "time": now_iso(),
                     "session": active_session(),
                     "kill_zone": is_kill_zone(),
+                    "version": "4.1",
                 })
                 return
 
@@ -1518,6 +1534,7 @@ class Handler(BaseHTTPRequestHandler):
                             "yahoo_ticker": c["yahoo"],
                             "spot_code": c["spot_code"],
                             "metals_spot": c["metals_spot"],
+                            "price": round(st["price"], c["decimals"]),
                         }
                 self._json({"ok": True, "data": data})
                 return
@@ -1527,7 +1544,6 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self._json({"ok": False, "error": str(exc)}, 500)
 
-    # ------------------------------------------------------------------ POST
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
@@ -1840,9 +1856,15 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .reason-fail { border-left: 3px solid #64748b; }
   html[dir="rtl"] .reason-pass { border-left: none; border-right: 3px solid #10b981; }
   html[dir="rtl"] .reason-fail { border-left: none; border-right: 3px solid #64748b; }
+  .footer-tile {
+    background: linear-gradient(180deg, rgba(15,23,42,0.92) 0%, rgba(2,6,23,0.88) 100%);
+    border: 1px solid rgba(59,130,246,0.12);
+    transition: border-color .2s ease;
+  }
+  .footer-tile:hover { border-color: rgba(59,130,246,0.28); }
 </style>
 </head>
-<body class="text-slate-200 min-h-screen pb-16">
+<body class="text-slate-200 min-h-screen">
 
 <header class="sticky top-0 z-40 backdrop-blur-xl bg-slate-950/78 border-b border-blue-500/15">
   <div class="max-w-[1750px] mx-auto px-4 py-3 flex flex-wrap items-center gap-3 justify-between">
@@ -1850,7 +1872,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 via-blue-600 to-indigo-700 flex items-center justify-center font-black text-lg shadow-lg glow-blue">P</div>
       <div>
         <div class="text-[15px] font-bold tracking-tight text-white" data-i18n="app_title">Pro Trading &amp; Macro Intelligence</div>
-        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v4.0</div>
+        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v4.1</div>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -2233,8 +2255,61 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
 </main>
 
-<footer class="fixed bottom-0 left-0 right-0 text-center text-[10px] text-slate-600 bg-slate-950/85 border-t border-slate-800 py-2 z-30">
-  <span data-i18n="footer">Pro Trading &amp; Macro Intelligence Engine · Python stdlib · SQLite · gold-api.com + Yahoo Finance</span> · © <span id="year"></span>
+<footer class="mt-10 border-t border-slate-800 bg-gradient-to-b from-slate-950/85 to-black/60">
+  <div class="max-w-[1750px] mx-auto px-4 py-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+
+    <div class="footer-tile rounded-xl p-5">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-xl">ℹ️</span>
+        <h4 class="text-[11px] font-bold text-sky-400 uppercase tracking-[0.22em]" data-i18n="footer_about_title">About Engine</h4>
+      </div>
+      <p class="text-[12px] text-slate-400 leading-relaxed" data-i18n="footer_about_text">
+        Pro Trading &amp; Macro Intelligence Engine is an institutional-grade ICT analysis platform.
+        It combines real-time spot market data (gold-api.com), Yahoo Finance FX and DXY feeds, a
+        Technical × Macro Confluence scoring engine (0–10), CFTC COT institutional positioning,
+        central-bank rate probabilities, a live macro/geopolitical risk gauge, and AI self-learning
+        structural feedback. It supports Scalping Mode A (1W/1D/1H → M5), Scalping Mode B
+        (1W/1D/4H → M15/M1), and Swing (H1/H4) with strict risk-based position sizing.
+      </p>
+    </div>
+
+    <div class="footer-tile rounded-xl p-5">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-xl">👨‍💻</span>
+        <h4 class="text-[11px] font-bold text-fuchsia-400 uppercase tracking-[0.22em]" data-i18n="footer_dev_title">Developer</h4>
+      </div>
+      <div class="text-emerald-300 font-bold text-base mb-1" data-i18n="footer_dev_name">Built by Eng. Abdulelah Sadeq</div>
+      <div class="text-[11px] text-slate-500 leading-relaxed" data-i18n="footer_dev_role">
+        Quantitative FinTech &amp; Algorithmic Trading Systems Architect
+      </div>
+      <div class="mt-4 pt-3 border-t border-slate-800/60 text-[10px] text-slate-600" data-i18n="footer_dev_stack">
+        Stack: Python stdlib · SQLite · Tailwind CSS · Vanilla JS
+      </div>
+    </div>
+
+    <div class="footer-tile rounded-xl p-5">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-xl">📖</span>
+        <h4 class="text-[11px] font-bold text-amber-400 uppercase tracking-[0.22em]" data-i18n="footer_guide_title">User Guide</h4>
+      </div>
+      <ul class="text-[12px] text-slate-400 space-y-2">
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">1.</span><span data-i18n="footer_guide_1">Set Capital and Risk% in the Account panel — saved permanently to SQLite.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">2.</span><span data-i18n="footer_guide_2">Pick a Trade Mode (Scalping A/B or Swing) — HTF analysis and entry timeframe auto-populate.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">3.</span><span data-i18n="footer_guide_3">Check the Confluence score — trades below 5/10 are rejected to protect capital.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">4.</span><span data-i18n="footer_guide_4">Monitor Active and Pending trades in real time — SL/TP are auto-evaluated every 0.5s.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">5.</span><span data-i18n="footer_guide_5">Review the AI Self-Learning Journal after every LOSS for auto-generated structural lessons.</span></li>
+      </ul>
+    </div>
+
+  </div>
+
+  <div class="border-t border-slate-800/60 py-3">
+    <div class="max-w-[1750px] mx-auto px-4 text-center text-[10px] text-slate-600">
+      <span data-i18n="footer_copyright">All rights reserved</span>
+      · <span data-i18n="app_title">Pro Trading &amp; Macro Intelligence Engine</span>
+      · © <span id="year">2024</span>
+    </div>
+  </div>
 </footer>
 
 <script>
@@ -2244,7 +2319,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
 const I18N = {
   en: {
     app_title: "Pro Trading & Macro Intelligence",
-    app_subtitle: "Institutional ICT Engine · v4.0",
+    app_subtitle: "Institutional ICT Engine · v4.1",
     live: "LIVE", stale: "FALLBACK",
     session: "Session", kill_zone: "Kill Zone", capital: "Capital", win_rate: "Win Rate",
     active: "ACTIVE", inactive: "INACTIVE",
@@ -2291,7 +2366,6 @@ const I18N = {
     no_lessons: "No lessons yet — losses will appear here automatically",
     no_active: "No active positions", no_pending: "No pending limit orders",
     no_history: "No closed trades yet",
-    footer: "Pro Trading & Macro Intelligence Engine · Python stdlib · SQLite · gold-api.com + Yahoo Finance",
     bullish: "Bullish", bearish: "Bearish", neutral: "Neutral",
     strong: "Strong", moderate: "Moderate", weak: "Weak", avoid: "Avoid",
     approved: "APPROVED", rejected: "REJECTED",
@@ -2307,10 +2381,23 @@ const I18N = {
     clear_confirm: "Clear all self-learning entries?",
     risk_on: "Risk-On", risk_off: "Risk-Off", crisis: "Crisis",
     neutral_constructive: "Neutral-Constructive",
+    footer_about_title: "About Engine",
+    footer_about_text: "Pro Trading & Macro Intelligence Engine is an institutional-grade ICT analysis platform. It combines real-time spot market data (gold-api.com), Yahoo Finance FX and DXY feeds, a Technical × Macro Confluence scoring engine (0–10), CFTC COT institutional positioning, central-bank rate probabilities, a live macro/geopolitical risk gauge, and AI self-learning structural feedback. It supports Scalping Mode A (1W/1D/1H → M5), Scalping Mode B (1W/1D/4H → M15/M1), and Swing (H1/H4) with strict risk-based position sizing.",
+    footer_dev_title: "Developer",
+    footer_dev_name: "Built by Eng. Abdulelah Sadeq",
+    footer_dev_role: "Quantitative FinTech & Algorithmic Trading Systems Architect",
+    footer_dev_stack: "Stack: Python stdlib · SQLite · Tailwind CSS · Vanilla JS",
+    footer_guide_title: "User Guide",
+    footer_guide_1: "Set Capital and Risk% in the Account panel — saved permanently to SQLite.",
+    footer_guide_2: "Pick a Trade Mode (Scalping A/B or Swing) — HTF analysis and entry timeframe auto-populate.",
+    footer_guide_3: "Check the Confluence score — trades below 5/10 are rejected to protect capital.",
+    footer_guide_4: "Monitor Active and Pending trades in real time — SL/TP are auto-evaluated every 0.5s.",
+    footer_guide_5: "Review the AI Self-Learning Journal after every LOSS for auto-generated structural lessons.",
+    footer_copyright: "All rights reserved",
   },
   ar: {
     app_title: "محرك التداول والذكاء الكلي الاحترافي",
-    app_subtitle: "محرك ICT المؤسسي · الإصدار 4.0",
+    app_subtitle: "محرك ICT المؤسسي · الإصدار 4.1",
     live: "مباشر", stale: "احتياطي",
     session: "الجلسة", kill_zone: "منطقة القتل", capital: "رأس المال", win_rate: "نسبة النجاح",
     active: "نشط", inactive: "غير نشط",
@@ -2357,7 +2444,6 @@ const I18N = {
     no_lessons: "لا توجد دروس بعد — ستظهر الدروس تلقائياً عند الخسائر",
     no_active: "لا توجد صفقات نشطة", no_pending: "لا توجد أوامر معلقة",
     no_history: "لا توجد صفقات مغلقة بعد",
-    footer: "محرك التداول والذكاء الكلي الاحترافي · Python stdlib · SQLite · gold-api.com + Yahoo Finance",
     bullish: "صاعد", bearish: "هابط", neutral: "محايد",
     strong: "قوي", moderate: "متوسط", weak: "ضعيف", avoid: "تجنب",
     approved: "معتمد", rejected: "مرفوض",
@@ -2373,6 +2459,19 @@ const I18N = {
     clear_confirm: "مسح جميع سجلات التعلم الذاتي؟",
     risk_on: "شهية المخاطرة", risk_off: "النفور من المخاطرة", crisis: "أزمة",
     neutral_constructive: "محايد إيجابي",
+    footer_about_title: "عن التطبيق",
+    footer_about_text: "محرك التداول والذكاء الكلي الاحترافي هو منصة تحليل ICT مؤسسية. يجمع بين بيانات السوق السبوت الحقيقية (gold-api.com)، وتغذية Yahoo Finance للفوركس ومؤشر الدولار، ومحرك تقييم التوافق الفني والكلي (0-10)، ومراكز المؤسسات CFTC COT، واحتمالات البنوك المركزية، ومقياس المخاطر الكلية والجيوسياسية المباشر، والتعلم الذاتي الهيكلي. يدعم سكالبينج النمط أ (1W/1D/1H → M5)، سكالبينج النمط ب (1W/1D/4H → M15/M1)، وسوينج (H1/H4) مع إدارة صارمة لحجم المركز على أساس المخاطر.",
+    footer_dev_title: "المطور",
+    footer_dev_name: "تم التطوير بواسطة المهندس عبدالإله صادق",
+    footer_dev_role: "مهندس كوانت فينتك ومعماري أنظمة التداول الخوارزمي",
+    footer_dev_stack: "التقنيات: Python stdlib · SQLite · Tailwind CSS · Vanilla JS",
+    footer_guide_title: "دليل الاستخدام",
+    footer_guide_1: "قم بتعيين رأس المال ونسبة المخاطرة في لوحة الحساب — تُحفظ بشكل دائم في SQLite.",
+    footer_guide_2: "اختر نمط التداول (سكالبينج أ/ب أو سوينج) — يتم تعبئة تحليل الأطر العليا وإطار الدخول تلقائياً.",
+    footer_guide_3: "تحقق من درجة التوافق — الصفقات الأقل من 5/10 تُرفض لحماية رأس المال.",
+    footer_guide_4: "راقب الصفقات النشطة والمعلقة في الوقت الفعلي — يتم تقييم SL/TP تلقائياً كل 0.5 ثانية.",
+    footer_guide_5: "راجع سجل التعلم الذاتي بعد كل خسارة للاطلاع على الدروس الهيكلية المولّدة تلقائياً.",
+    footer_copyright: "جميع الحقوق محفوظة",
   }
 };
 
@@ -2435,7 +2534,7 @@ const DEFAULT_DISTS = {
 };
 
 // ===================================================================
-// STATE  (cache of every API response → language re-render uses this)
+// STATE
 // ===================================================================
 const state = {
   lang: "en",
@@ -2535,41 +2634,46 @@ function sparkline(history) {
 }
 
 // ===================================================================
-// LANGUAGE  (synchronous full re-render)
+// LANGUAGE  — synchronous, fault-tolerant full re-render
 // ===================================================================
 function applyLanguage() {
-  const dict = I18N[state.lang];
-  document.documentElement.lang = state.lang;
-  document.documentElement.dir = isAr() ? "rtl" : "ltr";
-  document.getElementById("btnLang").textContent = isAr() ? "🌐 عربي" : "🌐 English";
+  const dict = I18N[state.lang] || I18N.en;
 
-  // Static i18n
-  document.querySelectorAll("[data-i18n]").forEach(el => {
-    const key = el.getAttribute("data-i18n");
-    if (dict[key] !== undefined) el.textContent = dict[key];
-  });
+  try {
+    document.documentElement.lang = state.lang;
+    document.documentElement.dir = isAr() ? "rtl" : "ltr";
+    const btn = document.getElementById("btnLang");
+    if (btn) btn.textContent = isAr() ? "🌐 عربي" : "🌐 English";
+  } catch (e) { console.error("[lang] html/btn:", e); }
 
-  // Rebuild every dynamic select
-  rebuildSymbolSelect();
-  rebuildStrategySelect();
-  rebuildModeSelect();
-  refreshEntryTFOptions();
+  try {
+    document.querySelectorAll("[data-i18n]").forEach(el => {
+      const key = el.getAttribute("data-i18n");
+      if (dict[key] !== undefined) el.textContent = dict[key];
+    });
+  } catch (e) { console.error("[lang] static i18n:", e); }
 
-  // Re-render everything from cache (synchronous, no async race)
-  if (state.pricesSnapshot) renderPrices(state.pricesSnapshot);
-  if (state.summary) renderSummary(state.summary);
-  if (state.trades.length) {
-    renderActive(state.trades);
-    renderPending(state.trades);
-    renderHistory(state.trades);
-  }
-  if (state.strategies.length) renderStrategies(state.strategies);
-  if (state.macro) renderMacro(state.macro);
-  if (state.cot) renderCOT(state.cot);
-  if (state.cb) renderCB(state.cb);
-  if (state.calendar.length) renderCalendar(state.calendar);
-  if (state.learning.length) renderLearning(state.learning);
-  if (state.lastConfluence) renderConfluence(state.lastConfluence);
+  try { rebuildSymbolSelect(); } catch (e) { console.error("[lang] symSel:", e); }
+  try { rebuildStrategySelect(); } catch (e) { console.error("[lang] stratSel:", e); }
+  try { rebuildModeSelect(); } catch (e) { console.error("[lang] modeSel:", e); }
+  try { refreshEntryTFOptions(); } catch (e) { console.error("[lang] entryTf:", e); }
+
+  try { if (state.pricesSnapshot) renderPrices(state.pricesSnapshot); } catch (e) { console.error("[lang] prices:", e); }
+  try { if (state.summary) renderSummary(state.summary); } catch (e) { console.error("[lang] summary:", e); }
+  try {
+    if (state.trades.length) {
+      renderActive(state.trades);
+      renderPending(state.trades);
+      renderHistory(state.trades);
+    }
+  } catch (e) { console.error("[lang] trades:", e); }
+  try { if (state.strategies.length) renderStrategies(state.strategies); } catch (e) { console.error("[lang] strategies:", e); }
+  try { if (state.macro) renderMacro(state.macro); } catch (e) { console.error("[lang] macro:", e); }
+  try { if (state.cot) renderCOT(state.cot); } catch (e) { console.error("[lang] cot:", e); }
+  try { if (state.cb) renderCB(state.cb); } catch (e) { console.error("[lang] cb:", e); }
+  try { if (state.calendar.length) renderCalendar(state.calendar); } catch (e) { console.error("[lang] calendar:", e); }
+  try { if (state.learning.length) renderLearning(state.learning); } catch (e) { console.error("[lang] learning:", e); }
+  try { if (state.lastConfluence) renderConfluence(state.lastConfluence); } catch (e) { console.error("[lang] confluence:", e); }
 }
 function toggleLanguage() {
   state.lang = isAr() ? "en" : "ar";
@@ -2581,6 +2685,7 @@ function toggleLanguage() {
 // ===================================================================
 function rebuildSymbolSelect() {
   const sel = document.getElementById("selSymbol");
+  if (!sel) return;
   const current = sel.value || "XAU/USD";
   sel.innerHTML = Object.keys(SYMBOLS).map(s =>
     `<option value="${s}">${escapeHtml(s)} · ${escapeHtml(symLabel(s))}</option>`
@@ -2589,6 +2694,7 @@ function rebuildSymbolSelect() {
 }
 function rebuildStrategySelect() {
   const sel = document.getElementById("selStrategy");
+  if (!sel) return;
   const current = sel.value || STRATEGIES[0];
   sel.innerHTML = STRATEGIES.map(s =>
     `<option value="${escapeHtml(s)}">${escapeHtml(strategyLabel(s))}</option>`
@@ -2597,6 +2703,7 @@ function rebuildStrategySelect() {
 }
 function rebuildModeSelect() {
   const sel = document.getElementById("selMode");
+  if (!sel) return;
   const current = sel.value || "SCALPING_A";
   sel.innerHTML = Object.keys(MODES).map(m =>
     `<option value="${m}">${escapeHtml(modeLabel(m))}</option>`
@@ -2647,10 +2754,9 @@ function renderPrices(data) {
   }
   grid.innerHTML = html;
 
-  document.getElementById("feedStatus").textContent =
-    liveCount === total ? t("live") : `${liveCount}/${total} ${t("live")}`;
-  document.getElementById("feedStatus").className =
-    liveCount > 0 ? "text-emerald-300 font-semibold" : "text-amber-300 font-semibold";
+  const statusEl = document.getElementById("feedStatus");
+  statusEl.textContent = liveCount === total ? t("live") : `${liveCount}/${total} ${t("live")}`;
+  statusEl.className = liveCount > 0 ? "text-emerald-300 font-semibold" : "text-amber-300 font-semibold";
   document.getElementById("feedDot").className =
     liveCount > 0 ? "text-emerald-400 pulse-dot w-2 h-2 rounded-full bg-emerald-400"
                   : "text-amber-400 w-2 h-2 rounded-full bg-amber-400";
@@ -3030,9 +3136,12 @@ async function refreshConfluence() {
 // FORM
 // ===================================================================
 function refreshEntryTFOptions() {
-  const mode = document.getElementById("selMode").value;
+  const modeEl = document.getElementById("selMode");
+  if (!modeEl) return;
+  const mode = modeEl.value;
   const tfs = MODES[mode].entry_tfs;
   const sel = document.getElementById("selEntryTF");
+  if (!sel) return;
   sel.innerHTML = tfs.map(tf => `<option value="${tf}">${tf}</option>`).join("");
   sel.disabled = tfs.length === 1;
 }
