@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Pro Trading & Macro Intelligence Engine v4.1
+Pro Trading & Macro Intelligence Engine v5.0
 =============================================
 Single-file production server (Python stdlib only).
 
+Persistence:
+  • Default DB: trading_engine.db  (override with $DB_PATH)
+  • PRAGMA synchronous=FULL + WAL (fallback to DELETE if unsupported)
+  • Every write path performs explicit commit() + rollback-on-error
+  • First-launch-only seeding — a user reset is NEVER auto-overwritten
+
 Price accuracy:
-  • XAU/USD & XAG/USD → gold-api.com (keyless, real SPOT)
+  • XAU/USD & XAG/USD  → gold-api.com (keyless, real SPOT)
   • EUR/USD GBP/USD USD/JPY DXY → Yahoo Finance v8 (regularMarketPrice)
-  • Out-of-bounds rejection — never accept a fake tick
-  • NO micro-tick noise, NO random walk, NO drift
+  • Threaded fetch every 1s with per-symbol backoff + bounds validation
 
-Bilingual UI:
-  • applyLanguage() re-renders synchronously from cached state.
-  • Every render call wrapped in try/catch — a single failure can't break the toggle.
-
-Footer:
-  • About Engine · Developer Credit · User Guide — full AR/EN.
+DXY trading:
+  • Inverse COT (EUR+GBP+JPY composite) — reflects real USD flow
+  • Dedicated VIX branch + existing yield/correlation checks
+  • Full lot-size, SL/TP, MARKET/LIMIT support
 
 Run:   python app.py
 Port:  $PORT (default 8000)
@@ -36,11 +39,12 @@ from datetime import datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
+from concurrent.futures import ThreadPoolExecutor
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-DB_PATH = os.environ.get("DB_PATH", "trading_bot_memory.db")
+DB_PATH = os.environ.get("DB_PATH", "trading_engine.db")
 PORT    = int(os.environ.get("PORT", 8000))
 HOST    = os.environ.get("HOST", "0.0.0.0")
 
@@ -52,9 +56,12 @@ CB_LOCK     = threading.RLock()
 CAL_LOCK    = threading.RLock()
 SHUTDOWN    = threading.Event()
 
+PRICE_POOL  = ThreadPoolExecutor(max_workers=6, thread_name_prefix="price")
+LAST_FETCH  = {}
+
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-HTTP_TIMEOUT = 7.0
+HTTP_TIMEOUT = 6.0
 
 # ============================================================================
 # SYMBOL UNIVERSE
@@ -99,7 +106,7 @@ SYMBOLS = {
 }
 
 # ============================================================================
-# PRICE SANITY BOUNDS — reject obviously-fake ticks (no drift, no bad data)
+# PRICE BOUNDS (reject obviously-fake ticks)
 # ============================================================================
 PRICE_BOUNDS = {
     "XAU/USD": (1000.0, 6000.0),
@@ -176,7 +183,7 @@ for _sym, _cfg in SYMBOLS.items():
     }
 
 # ============================================================================
-# MACRO STATE
+# MACRO / CB / COT STATE
 # ============================================================================
 MACRO = {
     "vix":             16.40,
@@ -189,9 +196,6 @@ MACRO = {
     "last_ok":         None,
 }
 
-# ============================================================================
-# CENTRAL BANK STATE
-# ============================================================================
 CB_STATE = {
     "FED": {"name_en": "Federal Reserve", "name_ar": "الاحتياطي الفيدرالي",
             "currency": "USD", "rate": 4.375, "next_days": 17,
@@ -207,9 +211,6 @@ CB_STATE = {
             "cut": 5.0, "hold": 65.0, "hike": 30.0},
 }
 
-# ============================================================================
-# COT STATE
-# ============================================================================
 COT_STATE = {
     "Gold":  {"long": 224850, "short": 78200, "prev_long": 221000, "prev_short": 81500,
               "label_ar": "الذهب", "source": "seed"},
@@ -223,9 +224,6 @@ COT_STATE = {
               "label_ar": "الين", "source": "seed"},
 }
 
-# ============================================================================
-# ECONOMIC CALENDAR SEED
-# ============================================================================
 CALENDAR_SEED = [
     {"month": 1,  "day": 28, "event_en": "FOMC Rate Decision",   "event_ar": "قرار الفائدة الفيدرالي",   "currency": "USD", "impact": "HIGH",   "forecast": "3.75%", "previous": "4.00%"},
     {"month": 3,  "day": 18, "event_en": "FOMC Rate Decision",   "event_ar": "قرار الفائدة الفيدرالي",   "currency": "USD", "impact": "HIGH",   "forecast": "3.75%", "previous": "3.75%"},
@@ -352,15 +350,30 @@ def default_sl_tp(symbol: str, mode: str, side: str, entry: float):
     return round(entry + sl_d, dec), round(entry - tp_d, dec)
 
 # ============================================================================
-# DATABASE
+# DATABASE  — FULL synchronous, WAL fallback, explicit commit/rollback
 # ============================================================================
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=30000")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("PRAGMA journal_mode=DELETE")
+        except Exception:
+            pass
+    try:
+        conn.execute("PRAGMA synchronous=FULL")
+    except Exception:
+        pass
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        pass
+    try:
+        conn.execute("PRAGMA busy_timeout=30000")
+    except Exception:
+        pass
     return conn
 
 def db_exec(sql: str, params: tuple = ()) -> int:
@@ -369,7 +382,17 @@ def db_exec(sql: str, params: tuple = ()) -> int:
         try:
             cur = c.execute(sql, params)
             c.commit()
-            return cur.lastrowid or 0
+            try:
+                last_id = cur.lastrowid
+            except Exception:
+                last_id = None
+            return last_id or 0
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+            raise
         finally:
             c.close()
 
@@ -463,11 +486,7 @@ def init_db() -> None:
                 cur.execute("ALTER TABLE trades ADD COLUMN confluence_bias TEXT DEFAULT 'neutral'")
 
             cur.execute("SELECT COUNT(*) AS c FROM bot_settings")
-            if cur.fetchone()["c"] == 0:
-                cur.execute(
-                    "INSERT INTO bot_settings (id, capital, risk_percent, updated_at) VALUES (1, ?, ?, ?)",
-                    (10000.0, 1.0, now_iso())
-                )
+            is_first_launch = cur.fetchone()["c"] == 0
 
             for name in ICT_STRATEGIES:
                 cur.execute(
@@ -475,8 +494,11 @@ def init_db() -> None:
                     (name,)
                 )
 
-            cur.execute("SELECT COUNT(*) AS c FROM strategies WHERE total_trades > 0")
-            if cur.fetchone()["c"] == 0:
+            if is_first_launch:
+                cur.execute(
+                    "INSERT INTO bot_settings (id, capital, risk_percent, updated_at) VALUES (1, ?, ?, ?)",
+                    (10000.0, 1.0, now_iso())
+                )
                 rng = random.Random(11)
                 for name in ICT_STRATEGIES:
                     total = rng.randint(30, 80)
@@ -488,14 +510,19 @@ def init_db() -> None:
                     )
 
             c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+            raise
         finally:
             c.close()
 
 # ============================================================================
-# PRICE FETCHERS — ACCURATE, NO NOISE, BOUNDS CHECKED
+# PRICE FETCHERS
 # ============================================================================
 def fetch_metals_spot(spot_code: str):
-    """True spot from gold-api.com (keyless). Returns (price, None, None, None)."""
     url = f"https://api.gold-api.com/price/{spot_code}"
     req = Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     with urlopen(req, timeout=HTTP_TIMEOUT) as resp:
@@ -506,7 +533,6 @@ def fetch_metals_spot(spot_code: str):
     return float(price), None, None, None
 
 def fetch_yahoo_quote(ticker: str):
-    """Yahoo Finance v8 — returns (price, prev_close, day_high, day_low)."""
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
            f"{ticker}?interval=1m&range=1d")
     req = Request(url, headers={
@@ -538,12 +564,11 @@ def fetch_yahoo_quote(ticker: str):
     )
 
 def apply_tick(sym: str, price: float, prev_close, day_high, day_low, source: str) -> bool:
-    """Validate against bounds, then apply exactly as received — no noise."""
     cfg = SYMBOLS[sym]
     bounds = PRICE_BOUNDS.get(sym, (0.000001, 1e12))
     lo, hi = bounds
     if not (lo <= price <= hi):
-        print(f"[price] {sym} REJECTED out-of-bounds price {price} (allowed {lo}-{hi})", flush=True)
+        print(f"[price] {sym} REJECTED out-of-bounds {price} (allowed {lo}-{hi})", flush=True)
         return False
     with PRICE_LOCK:
         st = PRICES[sym]
@@ -566,27 +591,51 @@ def apply_tick(sym: str, price: float, prev_close, day_high, day_low, source: st
             h.pop(0)
     return True
 
-def fetch_all_prices() -> None:
-    for sym, cfg in SYMBOLS.items():
-        try:
-            if cfg["metals_spot"]:
-                try:
-                    price, _, _, _ = fetch_metals_spot(cfg["spot_code"])
-                    if apply_tick(sym, price, None, None, None, "gold-api-spot"):
-                        print(f"[price] {sym} = {price:.{cfg['decimals']}f}  (gold-api-spot)", flush=True)
-                        continue
-                except Exception as spot_exc:
-                    print(f"[price] {sym} spot failed ({spot_exc}) — falling back to Yahoo", flush=True)
-            price, prev_close, hi, lo = fetch_yahoo_quote(cfg["yahoo"])
-            if apply_tick(sym, price, prev_close, hi, lo, "yahoo"):
-                print(f"[price] {sym} = {price:.{cfg['decimals']}f}  (yahoo)", flush=True)
-        except Exception as exc:
-            print(f"[price] {sym} fetch failed: {exc}", flush=True)
+def should_fetch(sym: str) -> bool:
+    now = time.time()
+    entry = LAST_FETCH.get(sym)
+    if not entry:
+        return True
+    return (now - entry["time"]) >= entry["backoff"]
+
+def record_fetch(sym: str, success: bool) -> None:
+    LAST_FETCH[sym] = {
+        "time": time.time(),
+        "backoff": 1.0 if success else 20.0,
+    }
+
+def fetch_one_safe(sym: str) -> None:
+    if not should_fetch(sym):
+        return
+    cfg = SYMBOLS[sym]
+    try:
+        if cfg["metals_spot"]:
+            try:
+                price, _, _, _ = fetch_metals_spot(cfg["spot_code"])
+                if apply_tick(sym, price, None, None, None, "gold-api-spot"):
+                    record_fetch(sym, True)
+                    print(f"[price] {sym} = {price:.{cfg['decimals']}f}  (gold-api-spot)", flush=True)
+                    return
+            except Exception as spot_exc:
+                print(f"[price] {sym} spot failed ({spot_exc}) — Yahoo fallback", flush=True)
+        price, prev_close, hi, lo = fetch_yahoo_quote(cfg["yahoo"])
+        if apply_tick(sym, price, prev_close, hi, lo, "yahoo"):
+            record_fetch(sym, True)
+            print(f"[price] {sym} = {price:.{cfg['decimals']}f}  (yahoo)", flush=True)
+        else:
+            record_fetch(sym, False)
+    except Exception as exc:
+        print(f"[price] {sym} fetch failed: {exc}", flush=True)
+        record_fetch(sym, False)
 
 def price_feed_loop() -> None:
     while not SHUTDOWN.is_set():
-        fetch_all_prices()
-        SHUTDOWN.wait(2.0)
+        try:
+            for sym in SYMBOLS.keys():
+                PRICE_POOL.submit(fetch_one_safe, sym)
+        except Exception as exc:
+            print(f"[price_loop] {exc}", flush=True)
+        SHUTDOWN.wait(1.0)
 
 def day_rollover_loop() -> None:
     last_day = datetime.now(timezone.utc).date()
@@ -607,7 +656,7 @@ def day_rollover_loop() -> None:
         SHUTDOWN.wait(30.0)
 
 # ============================================================================
-# MACRO ENGINE
+# MACRO / CB / COT ENGINES
 # ============================================================================
 def macro_fetch_loop() -> None:
     while not SHUTDOWN.is_set():
@@ -616,7 +665,7 @@ def macro_fetch_loop() -> None:
             with MACRO_LOCK:
                 MACRO["vix"] = round(vix_price, 2)
         except Exception as exc:
-            print(f"[macro] VIX fetch failed: {exc}", flush=True)
+            print(f"[macro] VIX failed: {exc}", flush=True)
 
         try:
             tnx_price, _, _, _ = fetch_yahoo_quote("%5ETNX")
@@ -624,12 +673,11 @@ def macro_fetch_loop() -> None:
             with MACRO_LOCK:
                 MACRO["us10y"] = round(us10y, 3)
         except Exception as exc:
-            print(f"[macro] US10Y fetch failed: {exc}", flush=True)
+            print(f"[macro] US10Y failed: {exc}", flush=True)
 
         with MACRO_LOCK:
             MACRO["regime"] = classify_regime(MACRO["vix"])
             MACRO["safe_haven"] = classify_safe_haven(MACRO["regime"])
-
             with PRICE_LOCK:
                 xau = PRICES["XAU/USD"]["price"]
                 xag = PRICES["XAG/USD"]["price"]
@@ -665,9 +713,6 @@ def central_bank_loop() -> None:
             print(f"[cb] {exc}", flush=True)
         SHUTDOWN.wait(8.0)
 
-# ============================================================================
-# COT FETCH
-# ============================================================================
 COT_KEY_CANDIDATES = {
     "Gold":   ["gold", "gold-futures", "comex-gold"],
     "Silver": ["silver", "silver-futures", "comex-silver"],
@@ -755,7 +800,7 @@ def build_calendar() -> list:
     return out[:14]
 
 # ============================================================================
-# CONFLUENCE ENGINE
+# CONFLUENCE ENGINE  (DXY fully supported)
 # ============================================================================
 def macro_bias_for_symbol(symbol: str) -> str:
     regime = MACRO["regime"]
@@ -776,7 +821,7 @@ def macro_bias_for_symbol(symbol: str) -> str:
             return "bullish"
         if regime == "Risk-On":
             return "bearish"
-        return "bullish" if us10y > 4.4 else "neutral"
+        return "bullish" if us10y > 4.3 else "neutral"
     if symbol == "EUR/USD":
         if regime == "Risk-On":
             return "bullish"
@@ -798,8 +843,25 @@ def macro_bias_for_symbol(symbol: str) -> str:
     return "neutral"
 
 def cot_bias_for_symbol(symbol: str) -> str:
+    if symbol == "DXY":
+        total_net = 0
+        total_delta = 0
+        with COT_LOCK:
+            for asset in ("EUR", "GBP", "JPY"):
+                row = COT_STATE.get(asset)
+                if row:
+                    net = row["long"] - row["short"]
+                    delta = (row["long"] - row["prev_long"]) - (row["short"] - row["prev_short"])
+                    total_net += net
+                    total_delta += delta
+        if total_net < 0 and total_delta < 0:
+            return "bullish"
+        if total_net > 0 and total_delta > 0:
+            return "bearish"
+        return "neutral"
+
     mapping = {"XAU/USD": "Gold", "XAG/USD": "Silver", "EUR/USD": "EUR",
-               "GBP/USD": "GBP", "USD/JPY": "JPY", "DXY": None}
+               "GBP/USD": "GBP", "USD/JPY": "JPY"}
     asset = mapping.get(symbol)
     if asset is None:
         return "neutral"
@@ -909,21 +971,41 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
         })
 
     vix = MACRO["vix"]
-    if vix >= 25 and symbol in ("XAU/USD", "XAG/USD", "DXY") and side == "BUY":
+    vix_scored = False
+    if symbol == "DXY":
+        if vix >= 22 and side == "BUY":
+            score += 1
+            vix_scored = True
+            reasons.append({
+                "key": "vix_usd_bid", "points": 1, "passed": True,
+                "en": f"Elevated VIX ({vix:.1f}) supports USD bid on DXY BUY",
+                "ar": f"ارتفاع VIX ({vix:.1f}) يدعم الطلب على الدولار لشراء DXY",
+            })
+        elif vix <= 14 and side == "SELL":
+            score += 1
+            vix_scored = True
+            reasons.append({
+                "key": "vix_usd_sell", "points": 1, "passed": True,
+                "en": f"Low VIX ({vix:.1f}) supports risk-on USD selling on DXY SELL",
+                "ar": f"انخفاض VIX ({vix:.1f}) يدعم بيع الدولار على DXY",
+            })
+    elif symbol in ("XAU/USD", "XAG/USD") and side == "BUY" and vix >= 25:
         score += 1
+        vix_scored = True
         reasons.append({
             "key": "vix_haven", "points": 1, "passed": True,
             "en": f"Elevated VIX ({vix:.1f}) supports safe-haven {side}",
             "ar": f"ارتفاع VIX ({vix:.1f}) يدعم {('الشراء' if side == 'BUY' else 'البيع')} في الملاذ الآمن",
         })
-    elif vix <= 15 and symbol in ("EUR/USD", "GBP/USD") and side == "BUY":
+    elif symbol in ("EUR/USD", "GBP/USD") and side == "BUY" and vix <= 15:
         score += 1
+        vix_scored = True
         reasons.append({
             "key": "vix_risk_on", "points": 1, "passed": True,
             "en": f"Low VIX ({vix:.1f}) supports risk-on {side}",
             "ar": f"انخفاض VIX ({vix:.1f}) يدعم {('الشراء' if side == 'BUY' else 'البيع')} في شهية المخاطرة",
         })
-    else:
+    if not vix_scored:
         reasons.append({
             "key": "vix_neutral", "points": 0, "passed": False,
             "en": f"VIX ({vix:.1f}) provides no directional edge",
@@ -1051,7 +1133,7 @@ def compute_confluence(symbol: str, side: str, mode: str, strategy: str) -> dict
     }
 
 # ============================================================================
-# SELF-LEARNING LESSON GENERATOR
+# SELF-LEARNING
 # ============================================================================
 STRATEGY_LESSONS = {
     "Liquidity Sweep & Stop Hunt": (
@@ -1208,6 +1290,12 @@ def trade_evaluator() -> None:
                                 (tid, sym, strat, t["mode"], lesson, iso)
                             )
                     c.commit()
+                except Exception:
+                    try:
+                        c.rollback()
+                    except Exception:
+                        pass
+                    raise
                 finally:
                     c.close()
         except Exception as exc:
@@ -1220,7 +1308,7 @@ def trade_evaluator() -> None:
 # ============================================================================
 class Handler(BaseHTTPRequestHandler):
 
-    server_version = "ProTradingEngine/4.1"
+    server_version = "ProTradingEngine/5.0"
 
     def log_message(self, fmt, *args):
         pass
@@ -1288,7 +1376,8 @@ class Handler(BaseHTTPRequestHandler):
                     "time": now_iso(),
                     "session": active_session(),
                     "kill_zone": is_kill_zone(),
-                    "version": "4.1",
+                    "version": "5.0",
+                    "db_path": DB_PATH,
                 })
                 return
 
@@ -1823,8 +1912,8 @@ INDEX_HTML = r"""<!DOCTYPE html>
     transition: border-color .2s ease, transform .2s ease;
   }
   .card:hover { border-color: rgba(59,130,246,0.32); }
-  .flash-up   { animation: flashUp .65s ease-out; }
-  .flash-down { animation: flashDown .65s ease-out; }
+  .flash-up   { animation: flashUp .55s ease-out; }
+  .flash-down { animation: flashDown .55s ease-out; }
   @keyframes flashUp   { from { background-color: rgba(16,185,129,0.32); } to { background-color: transparent; } }
   @keyframes flashDown { from { background-color: rgba(244,63,94,0.32); } to { background-color: transparent; } }
   .pulse-dot { position: relative; display: inline-block; }
@@ -1872,7 +1961,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 via-blue-600 to-indigo-700 flex items-center justify-center font-black text-lg shadow-lg glow-blue">P</div>
       <div>
         <div class="text-[15px] font-bold tracking-tight text-white" data-i18n="app_title">Pro Trading &amp; Macro Intelligence</div>
-        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v4.1</div>
+        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v5.0</div>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -1902,7 +1991,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
   <section>
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-xs font-bold uppercase tracking-[0.22em] text-slate-400" data-i18n="live_market_feed">Live Market Feed</h2>
-      <div class="text-[10px] text-slate-500" data-i18n="feed_sub">Real spot feed (gold-api.com) + Yahoo Finance · no artificial noise</div>
+      <div class="text-[10px] text-slate-500" data-i18n="feed_sub">Real spot feed (gold-api.com) + Yahoo Finance · 1-second refresh</div>
     </div>
     <div id="priceGrid" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3"></div>
   </section>
@@ -2313,18 +2402,14 @@ INDEX_HTML = r"""<!DOCTYPE html>
 </footer>
 
 <script>
-// ===================================================================
-// I18N
-// ===================================================================
 const I18N = {
   en: {
-    app_title: "Pro Trading & Macro Intelligence",
-    app_subtitle: "Institutional ICT Engine · v4.1",
+    app_title: "Pro Trading & Macro Intelligence", app_subtitle: "Institutional ICT Engine · v5.0",
     live: "LIVE", stale: "FALLBACK",
     session: "Session", kill_zone: "Kill Zone", capital: "Capital", win_rate: "Win Rate",
     active: "ACTIVE", inactive: "INACTIVE",
     live_market_feed: "Live Market Feed",
-    feed_sub: "Real spot feed (gold-api.com) + Yahoo Finance · no artificial noise",
+    feed_sub: "Real spot feed (gold-api.com) + Yahoo Finance · 1-second refresh",
     account_risk: "Account & Risk Control",
     capital_usd: "Capital (USD)", risk_per_trade: "Risk per Trade (%)",
     save_permanently: "Save Permanently",
@@ -2361,15 +2446,13 @@ const I18N = {
     event: "Event", currency: "Currency", impact: "Impact",
     when: "When", forecast: "Forecast", previous: "Previous",
     ict_win_rates: "ICT Strategy Win Rates",
-    ai_self_learning: "AI Self-Learning Journal",
-    clear_all: "Clear all",
+    ai_self_learning: "AI Self-Learning Journal", clear_all: "Clear all",
     no_lessons: "No lessons yet — losses will appear here automatically",
     no_active: "No active positions", no_pending: "No pending limit orders",
     no_history: "No closed trades yet",
     bullish: "Bullish", bearish: "Bearish", neutral: "Neutral",
     strong: "Strong", moderate: "Moderate", weak: "Weak", avoid: "Avoid",
     approved: "APPROVED", rejected: "REJECTED",
-    confluence_hint: "Adjust the console inputs to see live confluence scoring",
     cot_source: "Source", macro_bias: "Macro Bias",
     days: "days", next_meeting: "Next meeting",
     cut: "Cut", hold: "Hold", hike: "Hike",
@@ -2396,13 +2479,12 @@ const I18N = {
     footer_copyright: "All rights reserved",
   },
   ar: {
-    app_title: "محرك التداول والذكاء الكلي الاحترافي",
-    app_subtitle: "محرك ICT المؤسسي · الإصدار 4.1",
+    app_title: "محرك التداول والذكاء الكلي الاحترافي", app_subtitle: "محرك ICT المؤسسي · الإصدار 5.0",
     live: "مباشر", stale: "احتياطي",
     session: "الجلسة", kill_zone: "منطقة القتل", capital: "رأس المال", win_rate: "نسبة النجاح",
     active: "نشط", inactive: "غير نشط",
     live_market_feed: "تغذية السوق المباشرة",
-    feed_sub: "تغذية سبوت حقيقية (gold-api.com) + Yahoo Finance · بدون ضوضاء اصطناعية",
+    feed_sub: "تغذية سبوت حقيقية (gold-api.com) + Yahoo Finance · تحديث كل ثانية",
     account_risk: "الحساب وإدارة المخاطر",
     capital_usd: "رأس المال (دولار)", risk_per_trade: "المخاطرة لكل صفقة (%)",
     save_permanently: "حفظ بشكل دائم",
@@ -2439,15 +2521,13 @@ const I18N = {
     event: "الحدث", currency: "العملة", impact: "التأثير",
     when: "الموعد", forecast: "المتوقع", previous: "السابق",
     ict_win_rates: "نسب نجاح استراتيجيات ICT",
-    ai_self_learning: "سجل التعلم الذاتي للذكاء الاصطناعي",
-    clear_all: "مسح الكل",
+    ai_self_learning: "سجل التعلم الذاتي للذكاء الاصطناعي", clear_all: "مسح الكل",
     no_lessons: "لا توجد دروس بعد — ستظهر الدروس تلقائياً عند الخسائر",
     no_active: "لا توجد صفقات نشطة", no_pending: "لا توجد أوامر معلقة",
     no_history: "لا توجد صفقات مغلقة بعد",
     bullish: "صاعد", bearish: "هابط", neutral: "محايد",
     strong: "قوي", moderate: "متوسط", weak: "ضعيف", avoid: "تجنب",
     approved: "معتمد", rejected: "مرفوض",
-    confluence_hint: "عدّل مدخلات المنصة لرؤية تقييم التوافق المباشر",
     cot_source: "المصدر", macro_bias: "الانحياز الكلي",
     days: "يوم", next_meeting: "الاجتماع القادم",
     cut: "خفض", hold: "تثبيت", hike: "رفع",
@@ -2494,9 +2574,6 @@ const MODE_LABELS = {
   SWING: { en: "Swing", ar: "سوينج" },
 };
 
-// ===================================================================
-// STATIC CONFIG
-// ===================================================================
 const SYMBOLS = {
   "XAU/USD": { decimals: 2, mult: 100,    pip: 0.01,   label_en: "Gold",         label_ar: "الذهب" },
   "XAG/USD": { decimals: 3, mult: 1000,   pip: 0.01,   label_en: "Silver",       label_ar: "الفضة" },
@@ -2533,9 +2610,6 @@ const DEFAULT_DISTS = {
   "_fx":     { SCALPING_A: [0.0012, 0.0024], SCALPING_B: [0.0020, 0.0040], SWING: [0.0060, 0.0180] },
 };
 
-// ===================================================================
-// STATE
-// ===================================================================
 const state = {
   lang: "en",
   prices: {},
@@ -2552,9 +2626,6 @@ const state = {
   lastConfluence: null,
 };
 
-// ===================================================================
-// HELPERS
-// ===================================================================
 function t(key) {
   const dict = I18N[state.lang] || I18N.en;
   return dict[key] || I18N.en[key] || key;
@@ -2633,12 +2704,8 @@ function sparkline(history) {
   </svg>`;
 }
 
-// ===================================================================
-// LANGUAGE  — synchronous, fault-tolerant full re-render
-// ===================================================================
 function applyLanguage() {
   const dict = I18N[state.lang] || I18N.en;
-
   try {
     document.documentElement.lang = state.lang;
     document.documentElement.dir = isAr() ? "rtl" : "ltr";
@@ -2680,9 +2747,6 @@ function toggleLanguage() {
   applyLanguage();
 }
 
-// ===================================================================
-// SELECT BUILDERS
-// ===================================================================
 function rebuildSymbolSelect() {
   const sel = document.getElementById("selSymbol");
   if (!sel) return;
@@ -2712,9 +2776,6 @@ function rebuildModeSelect() {
   refreshHTFDisplay();
 }
 
-// ===================================================================
-// PRICE GRID
-// ===================================================================
 function renderPrices(data) {
   const grid = document.getElementById("priceGrid");
   let html = "";
@@ -2762,9 +2823,6 @@ function renderPrices(data) {
                   : "text-amber-400 w-2 h-2 rounded-full bg-amber-400";
 }
 
-// ===================================================================
-// SUMMARY
-// ===================================================================
 function renderSummary(s) {
   document.getElementById("topCapital").textContent = fmtUsd(s.capital);
   document.getElementById("topWinRate").textContent = s.win_rate.toFixed(1) + "%";
@@ -2799,9 +2857,6 @@ function renderSummary(s) {
   state.settings.risk_percent = s.risk_percent;
 }
 
-// ===================================================================
-// TRADES
-// ===================================================================
 function renderActive(trades) {
   const active = trades.filter(x => x.status === "ACTIVE");
   document.getElementById("activeCount").textContent = active.length + " open";
@@ -2913,9 +2968,6 @@ function renderHistory(trades) {
   }).join("");
 }
 
-// ===================================================================
-// STRATEGIES
-// ===================================================================
 function renderStrategies(list) {
   const body = document.getElementById("tblStrategies");
   body.innerHTML = list.map(s => {
@@ -2939,9 +2991,6 @@ function renderStrategies(list) {
   }).join("");
 }
 
-// ===================================================================
-// MACRO + COT + CB + CALENDAR
-// ===================================================================
 function renderMacro(d) {
   document.getElementById("macroVix").textContent = Number(d.vix).toFixed(2);
   document.getElementById("macro10y").textContent = Number(d.us10y).toFixed(3) + "%";
@@ -2990,7 +3039,7 @@ function computeClientMacroBias(d) {
   } else {
     out["XAU/USD"] = (!dxyRising && us10y < 4.3) ? "bullish" : "neutral";
     out["XAG/USD"] = "neutral";
-    out["DXY"] = us10y > 4.4 ? "bullish" : "neutral";
+    out["DXY"] = us10y > 4.3 ? "bullish" : "neutral";
     out["USD/JPY"] = us10y > 4.3 ? "bullish" : "bearish";
     out["EUR/USD"] = dxyRising ? "bearish" : "bullish";
     out["GBP/USD"] = "neutral";
@@ -3089,9 +3138,6 @@ function renderLearning(list) {
     </div>`).join("");
 }
 
-// ===================================================================
-// CONFLUENCE RENDER
-// ===================================================================
 function renderConfluence(c) {
   state.lastConfluence = c;
   const score = Number(c.score);
@@ -3132,9 +3178,6 @@ async function refreshConfluence() {
   } catch (e) { console.error("confluence:", e); }
 }
 
-// ===================================================================
-// FORM
-// ===================================================================
 function refreshEntryTFOptions() {
   const modeEl = document.getElementById("selMode");
   if (!modeEl) return;
@@ -3200,9 +3243,6 @@ function updateLotPreview() {
   el.textContent = Math.max(0.01, lot).toFixed(2);
 }
 
-// ===================================================================
-// ACTIONS
-// ===================================================================
 async function saveSettings() {
   const cap = parseFloat(document.getElementById("inpCapital").value);
   const risk = parseFloat(document.getElementById("inpRisk").value);
@@ -3270,9 +3310,6 @@ async function clearLearning() {
   } catch (e) { alert(t("error_generic") + ": " + e.message); }
 }
 
-// ===================================================================
-// POLLING  (cache every result into state before rendering)
-// ===================================================================
 async function pollPrices() {
   try {
     const r = await api("/api/prices");
@@ -3324,9 +3361,16 @@ async function pollLearning() {
   catch (e) { console.error(e); }
 }
 
-// ===================================================================
-// BOOT
-// ===================================================================
+async function priceLoop() {
+  while (true) {
+    const start = Date.now();
+    await pollPrices();
+    const elapsed = Date.now() - start;
+    const wait = Math.max(50, 1000 - elapsed);
+    await new Promise(r => setTimeout(r, wait));
+  }
+}
+
 async function boot() {
   document.getElementById("year").textContent = new Date().getFullYear();
   document.getElementById("btnLang").addEventListener("click", toggleLanguage);
@@ -3359,7 +3403,7 @@ async function boot() {
   applyDefaults();
   refreshConfluence();
 
-  setInterval(pollPrices, 2000);
+  priceLoop();
   setInterval(pollSummary, 3000);
   setInterval(pollTrades, 2500);
   setInterval(pollStrategies, 5000);
@@ -3413,6 +3457,7 @@ def main():
     finally:
         SHUTDOWN.set()
         server.server_close()
+        PRICE_POOL.shutdown(wait=False)
         for th in threads:
             th.join(timeout=3.0)
         print("[shutdown] complete", flush=True)
