@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Pro Trading & Macro Intelligence Engine v5.0
+Pro Trading & Macro Intelligence Engine v6.0
 =============================================
 Single-file production server (Python stdlib only).
 
-Persistence:
-  • Default DB: trading_engine.db  (override with $DB_PATH)
-  • PRAGMA synchronous=FULL + WAL (fallback to DELETE if unsupported)
-  • Every write path performs explicit commit() + rollback-on-error
-  • First-launch-only seeding — a user reset is NEVER auto-overwritten
+NEW in v6.0 — Market Bias Index:
+  • -100 to +100 score from DXY momentum + US10Y yield + CFTC COT + Gold/Silver ratio
+  • Prominent dashboard display with color-coded zones
+  • Directional guardrail blocks counter-trend trades in UI + backend
+  • Force-override escape hatch for advanced users
+  • Auto-dispatch auto-aligns with macro trend
 
-Price accuracy:
-  • XAU/USD & XAG/USD  → gold-api.com (keyless, real SPOT)
-  • EUR/USD GBP/USD USD/JPY DXY → Yahoo Finance v8 (regularMarketPrice)
-  • Threaded fetch every 1s with per-symbol backoff + bounds validation
-
-DXY trading:
-  • Inverse COT (EUR+GBP+JPY composite) — reflects real USD flow
-  • Dedicated VIX branch + existing yield/correlation checks
-  • Full lot-size, SL/TP, MARKET/LIMIT support
+PRESERVED from v5.0:
+  • gold-api.com spot + Yahoo Finance FX/DXY feeds (1-second refresh)
+  • trading_engine.db persistence with synchronous=FULL + explicit commit/rollback
+  • DXY fully tradeable (inverse-COPY composite + dedicated VIX branch)
+  • AI self-learning lessons on every LOSS
+  • Full bilingual AR/EN UI
+  • Professional footer (About / Developer / User Guide)
 
 Run:   python app.py
 Port:  $PORT (default 8000)
@@ -105,9 +104,6 @@ SYMBOLS = {
     },
 }
 
-# ============================================================================
-# PRICE BOUNDS (reject obviously-fake ticks)
-# ============================================================================
 PRICE_BOUNDS = {
     "XAU/USD": (1000.0, 6000.0),
     "XAG/USD": (5.0, 200.0),
@@ -117,9 +113,6 @@ PRICE_BOUNDS = {
     "DXY":     (70.0, 140.0),
 }
 
-# ============================================================================
-# TRADE MODES
-# ============================================================================
 TRADE_MODES = {
     "SCALPING_A": {
         "label_en": "Scalping Mode A", "label_ar": "سكالبينج النمط أ",
@@ -135,9 +128,6 @@ TRADE_MODES = {
     },
 }
 
-# ============================================================================
-# ICT STRATEGIES
-# ============================================================================
 ICT_STRATEGIES = [
     "Liquidity Sweep & Stop Hunt",
     "Fair Value Gap (FVG)",
@@ -163,6 +153,10 @@ STRATEGY_AR = {
     "OTE & Premium/Discount": "الدخول الأمثل والعلاوة/الخصم",
     "Inversion FVG (IFVG)": "الفجوة المكسورة",
 }
+
+# Symbols that are BULLISH when USD is weak (anti-USD), vs BEARISH when USD is weak
+ANTI_USD_SYMBOLS = ("XAU/USD", "XAG/USD", "EUR/USD", "GBP/USD")
+PRO_USD_SYMBOLS  = ("USD/JPY", "DXY")
 
 # ============================================================================
 # LIVE PRICE STATE
@@ -350,7 +344,7 @@ def default_sl_tp(symbol: str, mode: str, side: str, entry: float):
     return round(entry + sl_d, dec), round(entry - tp_d, dec)
 
 # ============================================================================
-# DATABASE  — FULL synchronous, WAL fallback, explicit commit/rollback
+# DATABASE — synchronous=FULL, WAL fallback, explicit commit/rollback
 # ============================================================================
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
@@ -447,6 +441,7 @@ def init_db() -> None:
                     exit_price REAL,
                     confluence_score REAL DEFAULT 0.0,
                     confluence_bias TEXT DEFAULT 'neutral',
+                    force_override INTEGER DEFAULT 0,
                     opened_at TEXT NOT NULL,
                     activated_at TEXT,
                     closed_at TEXT
@@ -484,6 +479,8 @@ def init_db() -> None:
                 cur.execute("ALTER TABLE trades ADD COLUMN confluence_score REAL DEFAULT 0")
             if "confluence_bias" not in cols:
                 cur.execute("ALTER TABLE trades ADD COLUMN confluence_bias TEXT DEFAULT 'neutral'")
+            if "force_override" not in cols:
+                cur.execute("ALTER TABLE trades ADD COLUMN force_override INTEGER DEFAULT 0")
 
             cur.execute("SELECT COUNT(*) AS c FROM bot_settings")
             is_first_launch = cur.fetchone()["c"] == 0
@@ -800,7 +797,195 @@ def build_calendar() -> list:
     return out[:14]
 
 # ============================================================================
-# CONFLUENCE ENGINE  (DXY fully supported)
+# ★ NEW — MARKET BIAS INDEX (-100 to +100)
+# ============================================================================
+BIAS_GUARDRAIL_THRESHOLD = 60.0
+
+def compute_market_bias() -> dict:
+    """
+    Returns a -100 to +100 score reflecting USD directional pressure.
+    Positive = USD strengthening (bearish metals & risk FX, bullish DXY & USD/JPY).
+    Negative = USD weakening (bullish metals & risk FX, bearish DXY & USD/JPY).
+    """
+    components = []
+    score = 0.0
+
+    # ---- 1. DXY momentum (-30 to +30) ----
+    try:
+        with PRICE_LOCK:
+            dxy_now = PRICES["DXY"]["price"]
+            dxy_prev = PRICES["DXY"]["prev_close"]
+        if dxy_prev > 0:
+            dxy_chg_pct = (dxy_now - dxy_prev) / dxy_prev * 100.0
+        else:
+            dxy_chg_pct = 0.0
+        dxy_pts = max(-30.0, min(30.0, dxy_chg_pct * 300.0))
+        score += dxy_pts
+        components.append({
+            "key": "dxy",
+            "name_en": "DXY Momentum",
+            "name_ar": "زخم مؤشر الدولار",
+            "value": round(dxy_chg_pct, 3),
+            "unit": "%",
+            "points": round(dxy_pts, 1),
+            "impact": "bullish_usd" if dxy_pts > 5 else ("bearish_usd" if dxy_pts < -5 else "neutral"),
+        })
+    except Exception as exc:
+        print(f"[bias] dxy component failed: {exc}", flush=True)
+
+    # ---- 2. US10Y yield (-25 to +25) ----
+    try:
+        with MACRO_LOCK:
+            us10y = MACRO["us10y"]
+        yld_dev = (us10y - 4.30) * 50.0
+        yld_pts = max(-25.0, min(25.0, yld_dev))
+        score += yld_pts
+        components.append({
+            "key": "us10y",
+            "name_en": "US10Y Yield",
+            "name_ar": "عائد السندات الأمريكية",
+            "value": round(us10y, 3),
+            "unit": "%",
+            "points": round(yld_pts, 1),
+            "impact": "bullish_usd" if yld_pts > 5 else ("bearish_usd" if yld_pts < -5 else "neutral"),
+        })
+    except Exception as exc:
+        print(f"[bias] yield component failed: {exc}", flush=True)
+
+    # ---- 3. COT aggregate foreign net long (-25 to +25) ----
+    try:
+        with COT_LOCK:
+            foreign_net = 0
+            for asset in ("Gold", "EUR", "GBP", "JPY"):
+                row = COT_STATE.get(asset)
+                if row:
+                    foreign_net += row["long"] - row["short"]
+        cot_pts = max(-25.0, min(25.0, -foreign_net / 200000.0 * 25.0))
+        score += cot_pts
+        components.append({
+            "key": "cot",
+            "name_en": "COT Positioning",
+            "name_ar": "مراكز المؤسسات",
+            "value": int(foreign_net),
+            "unit": "net",
+            "points": round(cot_pts, 1),
+            "impact": "bullish_usd" if cot_pts > 5 else ("bearish_usd" if cot_pts < -5 else "neutral"),
+        })
+    except Exception as exc:
+        print(f"[bias] cot component failed: {exc}", flush=True)
+
+    # ---- 4. Gold/Silver ratio (-20 to +20) ----
+    try:
+        with PRICE_LOCK:
+            xau = PRICES["XAU/USD"]["price"]
+            xag = PRICES["XAG/USD"]["price"]
+        gsr = (xau / xag) if xag > 0 else 80.0
+        gsr_pts = max(-20.0, min(20.0, (gsr - 80.0) * 2.0))
+        score += gsr_pts
+        components.append({
+            "key": "gsr",
+            "name_en": "Gold/Silver Ratio",
+            "name_ar": "نسبة الذهب/الفضة",
+            "value": round(gsr, 2),
+            "unit": "",
+            "points": round(gsr_pts, 1),
+            "impact": "bullish_usd" if gsr_pts > 5 else ("bearish_usd" if gsr_pts < -5 else "neutral"),
+        })
+    except Exception as exc:
+        print(f"[bias] gsr component failed: {exc}", flush=True)
+
+    score = max(-100.0, min(100.0, score))
+
+    # ---- Label & direction ----
+    if score >= 60:
+        label_en = "Strong USD Bias"
+        label_ar = "انحياز قوي للدولار"
+        direction = "bullish_usd"
+    elif score >= 25:
+        label_en = "Mild USD Strength"
+        label_ar = "قوة معتدلة للدولار"
+        direction = "bullish_usd"
+    elif score <= -60:
+        label_en = "Strong Anti-USD Bias"
+        label_ar = "انحياز قوي ضد الدولار"
+        direction = "bearish_usd"
+    elif score <= -25:
+        label_en = "Mild USD Weakness"
+        label_ar = "ضعف معتدل للدولار"
+        direction = "bearish_usd"
+    else:
+        label_en = "Neutral"
+        label_ar = "محايد"
+        direction = "neutral"
+
+    guardrail_active = abs(score) >= BIAS_GUARDRAIL_THRESHOLD
+
+    return {
+        "score": round(score, 1),
+        "direction": direction,
+        "label_en": label_en,
+        "label_ar": label_ar,
+        "components": components,
+        "guardrail_active": guardrail_active,
+        "guardrail_threshold": BIAS_GUARDRAIL_THRESHOLD,
+        "updated_at": now_iso(),
+    }
+
+
+def symbol_alignment(symbol: str, side: str, bias: dict) -> dict:
+    """
+    Compute directional alignment for a specific symbol+side against the market bias.
+    Returns: aligned, blocked, with_trend_side, warning_en, warning_ar
+    """
+    score = bias.get("score", 0.0)
+    guardrail = bias.get("guardrail_active", False)
+
+    with_trend_side = None
+    if symbol in ANTI_USD_SYMBOLS:
+        if score < 0:
+            with_trend_side = "BUY"
+        elif score > 0:
+            with_trend_side = "SELL"
+    elif symbol in PRO_USD_SYMBOLS:
+        if score > 0:
+            with_trend_side = "BUY"
+        elif score < 0:
+            with_trend_side = "SELL"
+
+    blocked = guardrail and with_trend_side is not None and side != with_trend_side
+    aligned = (not guardrail) or (with_trend_side is not None and side == with_trend_side)
+
+    warning_en = ""
+    warning_ar = ""
+    if blocked:
+        trend_word_en = "bullish" if with_trend_side == "BUY" else "bearish"
+        trend_word_ar = "صاعد" if with_trend_side == "BUY" else "هابط"
+        side_ar = "الشراء" if side == "BUY" else "البيع"
+        warning_en = (
+            f"Market Bias Score is {score:+.1f} — strong {trend_word_en} pressure on {symbol}. "
+            f"Your {side} is counter-trend. Align with the macro trend by choosing {with_trend_side} "
+            f"or wait for the bias to neutralize."
+        )
+        warning_ar = (
+            f"درجة انحياز السوق {score:+.1f} — ضغط {trend_word_ar} قوي على {symbol}. "
+            f"{side_ar} عكس الاتجاه. توافق مع الاتجاه الكلي باختيار {with_trend_side} "
+            f"أو انتظر حتى يتحول الانحياز للحياد."
+        )
+
+    return {
+        "symbol": symbol,
+        "side": side,
+        "aligned": aligned,
+        "blocked": blocked,
+        "with_trend_side": with_trend_side,
+        "guardrail_active": guardrail,
+        "market_score": score,
+        "warning_en": warning_en,
+        "warning_ar": warning_ar,
+    }
+
+# ============================================================================
+# CONFLUENCE ENGINE (DXY fully supported)
 # ============================================================================
 def macro_bias_for_symbol(symbol: str) -> str:
     regime = MACRO["regime"]
@@ -1308,7 +1493,7 @@ def trade_evaluator() -> None:
 # ============================================================================
 class Handler(BaseHTTPRequestHandler):
 
-    server_version = "ProTradingEngine/5.0"
+    server_version = "ProTradingEngine/6.0"
 
     def log_message(self, fmt, *args):
         pass
@@ -1372,11 +1557,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/health":
                 self._json({
-                    "ok": True,
-                    "time": now_iso(),
+                    "ok": True, "time": now_iso(),
                     "session": active_session(),
                     "kill_zone": is_kill_zone(),
-                    "version": "5.0",
+                    "version": "6.0",
                     "db_path": DB_PATH,
                 })
                 return
@@ -1399,6 +1583,9 @@ class Handler(BaseHTTPRequestHandler):
                     "modes": TRADE_MODES,
                     "strategies": ICT_STRATEGIES,
                     "strategy_ar": STRATEGY_AR,
+                    "anti_usd_symbols": list(ANTI_USD_SYMBOLS),
+                    "pro_usd_symbols": list(PRO_USD_SYMBOLS),
+                    "guardrail_threshold": BIAS_GUARDRAIL_THRESHOLD,
                 })
                 return
 
@@ -1424,6 +1611,16 @@ class Handler(BaseHTTPRequestHandler):
                             "stale":      st["stale"],
                         }
                 self._json({"ok": True, "data": data})
+                return
+
+            if path == "/api/market_bias":
+                bias = compute_market_bias()
+                symbol = qs.get("symbol", [None])[0]
+                side = qs.get("side", [None])[0]
+                alignment = None
+                if symbol in SYMBOLS and side in ("BUY", "SELL"):
+                    alignment = symbol_alignment(symbol, side.upper(), bias)
+                self._json({"ok": True, "data": bias, "alignment": alignment})
                 return
 
             if path == "/api/settings":
@@ -1665,6 +1862,7 @@ class Handler(BaseHTTPRequestHandler):
                 mode = body.get("mode", "SCALPING_A")
                 strategy = body.get("strategy", ICT_STRATEGIES[0])
                 entry_tf = body.get("entry_timeframe", "")
+                force_override = bool(body.get("force", False))
 
                 if symbol not in SYMBOLS:
                     self._json({"ok": False, "error": f"unknown symbol {symbol}"}, 400); return
@@ -1680,6 +1878,22 @@ class Handler(BaseHTTPRequestHandler):
                     entry_tf = TRADE_MODES[mode]["entry_tfs"][0]
                 if entry_tf not in TRADE_MODES[mode]["entry_tfs"]:
                     self._json({"ok": False, "error": f"entry timeframe {entry_tf} not valid for {mode}"}, 400); return
+
+                # ★ MARKET BIAS GUARDRAIL ★
+                bias = compute_market_bias()
+                align = symbol_alignment(symbol, side, bias)
+                if align["blocked"] and not force_override:
+                    self._json({
+                        "ok": False,
+                        "error": f"Blocked by Market Bias Guardrail (score {bias['score']:+.1f}, "
+                                 f"with-trend side is {align['with_trend_side']}). "
+                                 f"Aligned trade or use force override.",
+                        "bias": bias,
+                        "alignment": align,
+                    }, 400)
+                    return
+                if align["blocked"] and force_override:
+                    print(f"[trade] FORCE-OVERRIDE accepted: {symbol} {side} vs bias {bias['score']:+.1f}", flush=True)
 
                 cfg = SYMBOLS[symbol]
                 dec = cfg["decimals"]
@@ -1732,15 +1946,23 @@ class Handler(BaseHTTPRequestHandler):
                 new_id = db_exec(
                     "INSERT INTO trades (symbol, side, entry_type, mode, htf_analysis, "
                     "entry_timeframe, entry_price, stop_loss, take_profit, lot_size, "
-                    "strategy, status, confluence_score, confluence_bias, opened_at, activated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "strategy, status, confluence_score, confluence_bias, force_override, "
+                    "opened_at, activated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (symbol, side, entry_type, mode, htf_str, entry_tf,
                      entry, stop_loss, take_profit, lot, strategy,
                      status, confluence["score"], confluence["directional"],
+                     1 if force_override else 0,
                      now_iso(), activated_at)
                 )
                 r = db_query_one("SELECT * FROM trades WHERE id=?", (new_id,))
-                self._json({"ok": True, "data": dict(r), "confluence": confluence})
+                self._json({
+                    "ok": True, "data": dict(r),
+                    "confluence": confluence,
+                    "bias": bias,
+                    "alignment": align,
+                    "forced": force_override,
+                })
                 return
 
             if path == "/api/auto_dispatch":
@@ -1763,6 +1985,14 @@ class Handler(BaseHTTPRequestHandler):
                     live = PRICES[symbol]["price"]
 
                 side = "BUY" if momentum >= 0 else "SELL"
+
+                # ★ AUTO-DISPATCH AUTO-ALIGNS WITH MARKET BIAS ★
+                bias = compute_market_bias()
+                if bias["guardrail_active"]:
+                    align_test = symbol_alignment(symbol, side, bias)
+                    if align_test["blocked"] and align_test["with_trend_side"]:
+                        side = align_test["with_trend_side"]
+                        print(f"[auto] flipped side to {side} to align with bias {bias['score']:+.1f}", flush=True)
 
                 tops = db_query(
                     "SELECT name FROM strategies WHERE total_trades > 0 "
@@ -1787,6 +2017,7 @@ class Handler(BaseHTTPRequestHandler):
 
                 sl, tp = default_sl_tp(symbol, mode, side, entry)
                 confluence = compute_confluence(symbol, side, mode, strategy)
+                align = symbol_alignment(symbol, side, bias)
 
                 s = db_query_one("SELECT capital, risk_percent FROM bot_settings WHERE id=1")
                 lot = calculate_lot_size(float(s["capital"]), float(s["risk_percent"]),
@@ -1799,15 +2030,21 @@ class Handler(BaseHTTPRequestHandler):
                 new_id = db_exec(
                     "INSERT INTO trades (symbol, side, entry_type, mode, htf_analysis, "
                     "entry_timeframe, entry_price, stop_loss, take_profit, lot_size, "
-                    "strategy, status, confluence_score, confluence_bias, opened_at, activated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "strategy, status, confluence_score, confluence_bias, force_override, "
+                    "opened_at, activated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (symbol, side, entry_type, mode, htf_str, entry_tf,
                      entry, sl, tp, lot, strategy, status,
-                     confluence["score"], confluence["directional"],
+                     confluence["score"], confluence["directional"], 0,
                      now_iso(), activated_at)
                 )
                 r = db_query_one("SELECT * FROM trades WHERE id=?", (new_id,))
-                self._json({"ok": True, "auto": True, "data": dict(r), "confluence": confluence})
+                self._json({
+                    "ok": True, "auto": True, "data": dict(r),
+                    "confluence": confluence,
+                    "bias": bias,
+                    "alignment": align,
+                })
                 return
 
             if path.startswith("/api/trades/") and path.endswith("/cancel"):
@@ -1951,6 +2188,12 @@ INDEX_HTML = r"""<!DOCTYPE html>
     transition: border-color .2s ease;
   }
   .footer-tile:hover { border-color: rgba(59,130,246,0.28); }
+  #biasMarker { transition: left 0.55s cubic-bezier(0.4, 0, 0.2, 1); }
+  .bias-pulse-strong { animation: biasPulse 2s ease-in-out infinite; }
+  @keyframes biasPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); }
+    50%      { box-shadow: 0 0 0 12px rgba(239,68,68,0); }
+  }
 </style>
 </head>
 <body class="text-slate-200 min-h-screen">
@@ -1961,7 +2204,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 via-blue-600 to-indigo-700 flex items-center justify-center font-black text-lg shadow-lg glow-blue">P</div>
       <div>
         <div class="text-[15px] font-bold tracking-tight text-white" data-i18n="app_title">Pro Trading &amp; Macro Intelligence</div>
-        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v5.0</div>
+        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v6.0</div>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -1994,6 +2237,42 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <div class="text-[10px] text-slate-500" data-i18n="feed_sub">Real spot feed (gold-api.com) + Yahoo Finance · 1-second refresh</div>
     </div>
     <div id="priceGrid" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3"></div>
+  </section>
+
+  <section id="biasSection" class="card rounded-xl p-5">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div class="flex items-center gap-2">
+        <h3 class="text-xs font-bold uppercase tracking-[0.22em] text-amber-400" data-i18n="market_bias_title">Market Bias Index</h3>
+        <span class="text-[9px] text-slate-500" data-i18n="market_bias_subtitle">DXY · US10Y · COT · GSR</span>
+      </div>
+      <span id="biasGuardrailBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400" data-i18n="bias_guardrail_off">GUARDRAIL: OFF</span>
+    </div>
+    <div class="flex flex-wrap items-center gap-4 mb-4">
+      <div class="flex flex-col items-center">
+        <div id="biasScoreDisplay" class="text-4xl font-black tabnum text-slate-300">0.0</div>
+        <div id="biasLabelDisplay" class="text-[11px] font-bold text-slate-400 mt-1 text-center">Neutral</div>
+      </div>
+      <div class="flex-1 min-w-[240px]">
+        <div class="relative h-4 rounded-full overflow-hidden bg-slate-900">
+          <div class="absolute inset-0 flex">
+            <div class="flex-1 bg-gradient-to-r from-emerald-600 to-emerald-500/60"></div>
+            <div class="flex-1 bg-gradient-to-r from-emerald-500/60 to-slate-700"></div>
+            <div class="flex-1 bg-gradient-to-r from-slate-700 to-rose-500/60"></div>
+            <div class="flex-1 bg-gradient-to-r from-rose-500/60 to-rose-600"></div>
+          </div>
+          <div id="biasMarker" class="absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" style="left:50%;transform:translateX(-50%)"></div>
+        </div>
+        <div class="flex justify-between text-[9px] text-slate-500 mt-1 tabnum">
+          <span>-100</span><span>-60</span><span>0</span><span>+60</span><span>+100</span>
+        </div>
+        <div id="biasDirectionDisplay" class="text-[10px] text-slate-500 text-center mt-1">USD Neutral</div>
+      </div>
+      <div class="flex flex-col items-end text-right">
+        <div class="text-[10px] uppercase tracking-widest text-slate-500" data-i18n="bias_with_trend_hint">With-Trend Assets</div>
+        <div id="biasWithTrendDisplay" class="text-[11px] font-semibold text-sky-300 mt-1">—</div>
+      </div>
+    </div>
+    <div id="biasComponentsGrid" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
   </section>
 
   <section class="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -2081,6 +2360,17 @@ INDEX_HTML = r"""<!DOCTYPE html>
         <div class="bg-slate-950/70 border border-sky-500/30 rounded-lg px-3 py-2">
           <div class="text-[10px] uppercase tracking-widest text-slate-500" data-i18n="lot_size">Calculated Lot Size</div>
           <div id="lotDisplay" class="text-emerald-300 font-bold text-lg tabnum">0.00</div>
+        </div>
+      </div>
+
+      <div id="guardrailBanner" class="hidden mt-3 bg-rose-950/60 border border-rose-700/60 rounded-lg p-3">
+        <div class="flex items-start gap-2">
+          <span class="text-rose-400 text-lg leading-none">⚠</span>
+          <div class="flex-1">
+            <div class="text-[11px] font-bold text-rose-200 mb-1" data-i18n="guardrail_blocked">Trade Blocked by Bias Guardrail</div>
+            <div id="guardrailText" class="text-[11px] text-rose-200/90 leading-relaxed"></div>
+            <button id="btnForceOverride" class="hidden mt-2 text-[10px] bg-rose-700/60 hover:bg-rose-600 px-3 py-1 rounded font-semibold text-white" data-i18n="force_override">Force Override (Not Recommended)</button>
+          </div>
         </div>
       </div>
 
@@ -2208,7 +2498,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
       </div>
     </div>
     <div class="p-5 space-y-5">
-
       <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-3">
           <div class="text-[10px] uppercase tracking-widest text-slate-500">VIX</div>
@@ -2310,7 +2599,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
           </table>
         </div>
       </div>
-
     </div>
   </section>
 
@@ -2355,10 +2643,11 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <p class="text-[12px] text-slate-400 leading-relaxed" data-i18n="footer_about_text">
         Pro Trading &amp; Macro Intelligence Engine is an institutional-grade ICT analysis platform.
         It combines real-time spot market data (gold-api.com), Yahoo Finance FX and DXY feeds, a
-        Technical × Macro Confluence scoring engine (0–10), CFTC COT institutional positioning,
-        central-bank rate probabilities, a live macro/geopolitical risk gauge, and AI self-learning
-        structural feedback. It supports Scalping Mode A (1W/1D/1H → M5), Scalping Mode B
-        (1W/1D/4H → M15/M1), and Swing (H1/H4) with strict risk-based position sizing.
+        Technical × Macro Confluence scoring engine (0–10), a live -100 to +100 Market Bias Index with
+        directional guardrail, CFTC COT institutional positioning, central-bank rate probabilities,
+        a live macro/geopolitical risk gauge, and AI self-learning structural feedback. Supports
+        Scalping Mode A (1W/1D/1H → M5), Scalping Mode B (1W/1D/4H → M15/M1), and Swing (H1/H4)
+        with strict risk-based position sizing.
       </p>
     </div>
 
@@ -2383,9 +2672,9 @@ INDEX_HTML = r"""<!DOCTYPE html>
       </div>
       <ul class="text-[12px] text-slate-400 space-y-2">
         <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">1.</span><span data-i18n="footer_guide_1">Set Capital and Risk% in the Account panel — saved permanently to SQLite.</span></li>
-        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">2.</span><span data-i18n="footer_guide_2">Pick a Trade Mode (Scalping A/B or Swing) — HTF analysis and entry timeframe auto-populate.</span></li>
-        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">3.</span><span data-i18n="footer_guide_3">Check the Confluence score — trades below 5/10 are rejected to protect capital.</span></li>
-        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">4.</span><span data-i18n="footer_guide_4">Monitor Active and Pending trades in real time — SL/TP are auto-evaluated every 0.5s.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">2.</span><span data-i18n="footer_guide_2">Check the Market Bias Index at the top — it warns you before you trade against the macro trend.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">3.</span><span data-i18n="footer_guide_3">Pick a Trade Mode (Scalping A/B or Swing) — HTF analysis and entry timeframe auto-populate.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">4.</span><span data-i18n="footer_guide_4">Confluence score below 5/10 rejects the trade; guardrail blocks counter-trend trades unless force-override is used.</span></li>
         <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">5.</span><span data-i18n="footer_guide_5">Review the AI Self-Learning Journal after every LOSS for auto-generated structural lessons.</span></li>
       </ul>
     </div>
@@ -2404,7 +2693,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
 <script>
 const I18N = {
   en: {
-    app_title: "Pro Trading & Macro Intelligence", app_subtitle: "Institutional ICT Engine · v5.0",
+    app_title: "Pro Trading & Macro Intelligence", app_subtitle: "Institutional ICT Engine · v6.0",
     live: "LIVE", stale: "FALLBACK",
     session: "Session", kill_zone: "Kill Zone", capital: "Capital", win_rate: "Win Rate",
     active: "ACTIVE", inactive: "INACTIVE",
@@ -2464,22 +2753,48 @@ const I18N = {
     clear_confirm: "Clear all self-learning entries?",
     risk_on: "Risk-On", risk_off: "Risk-Off", crisis: "Crisis",
     neutral_constructive: "Neutral-Constructive",
+    market_bias_title: "Market Bias Index",
+    market_bias_subtitle: "DXY · US10Y · COT · GSR",
+    bias_guardrail_off: "GUARDRAIL: OFF",
+    bias_guardrail_on: "GUARDRAIL: ACTIVE",
+    bias_with_trend_hint: "With-Trend Assets",
+    bias_strong_bull: "Strong USD Bias",
+    bias_bull: "Mild USD Strength",
+    bias_neutral: "Neutral",
+    bias_bear: "Mild USD Weakness",
+    bias_strong_bear: "Strong Anti-USD Bias",
+    bias_dxy: "DXY Momentum",
+    bias_us10y: "US10Y Yield",
+    bias_cot: "COT Positioning",
+    bias_gsr: "Gold/Silver Ratio",
+    bias_pts: "pts",
+    bias_bull_usd: "USD Bullish",
+    bias_bear_usd: "USD Bearish",
+    bias_neutral_impact: "Neutral",
+    guardrail_blocked: "Trade Blocked by Bias Guardrail",
+    force_override: "Force Override (Not Recommended)",
+    force_confirm: "Force-override the Market Bias Guardrail? This trade will fight the macro trend.",
+    alignment_buy_bias: "BUY is with trend",
+    alignment_sell_bias: "SELL is with trend",
+    alignment_neutral: "No strong directional bias",
+    dispatch_blocked: "Trade blocked by bias guardrail — align with trend or use Force Override",
+    dispatch_forced: "Trade dispatched with FORCE OVERRIDE",
     footer_about_title: "About Engine",
-    footer_about_text: "Pro Trading & Macro Intelligence Engine is an institutional-grade ICT analysis platform. It combines real-time spot market data (gold-api.com), Yahoo Finance FX and DXY feeds, a Technical × Macro Confluence scoring engine (0–10), CFTC COT institutional positioning, central-bank rate probabilities, a live macro/geopolitical risk gauge, and AI self-learning structural feedback. It supports Scalping Mode A (1W/1D/1H → M5), Scalping Mode B (1W/1D/4H → M15/M1), and Swing (H1/H4) with strict risk-based position sizing.",
+    footer_about_text: "Pro Trading & Macro Intelligence Engine is an institutional-grade ICT analysis platform. It combines real-time spot market data (gold-api.com), Yahoo Finance FX and DXY feeds, a Technical × Macro Confluence scoring engine (0–10), a live -100 to +100 Market Bias Index with directional guardrail, CFTC COT institutional positioning, central-bank rate probabilities, a live macro/geopolitical risk gauge, and AI self-learning structural feedback. Supports Scalping Mode A (1W/1D/1H → M5), Scalping Mode B (1W/1D/4H → M15/M1), and Swing (H1/H4) with strict risk-based position sizing.",
     footer_dev_title: "Developer",
     footer_dev_name: "Built by Eng. Abdulelah Sadeq",
     footer_dev_role: "Quantitative FinTech & Algorithmic Trading Systems Architect",
     footer_dev_stack: "Stack: Python stdlib · SQLite · Tailwind CSS · Vanilla JS",
     footer_guide_title: "User Guide",
     footer_guide_1: "Set Capital and Risk% in the Account panel — saved permanently to SQLite.",
-    footer_guide_2: "Pick a Trade Mode (Scalping A/B or Swing) — HTF analysis and entry timeframe auto-populate.",
-    footer_guide_3: "Check the Confluence score — trades below 5/10 are rejected to protect capital.",
-    footer_guide_4: "Monitor Active and Pending trades in real time — SL/TP are auto-evaluated every 0.5s.",
+    footer_guide_2: "Check the Market Bias Index at the top — it warns you before you trade against the macro trend.",
+    footer_guide_3: "Pick a Trade Mode (Scalping A/B or Swing) — HTF analysis and entry timeframe auto-populate.",
+    footer_guide_4: "Confluence score below 5/10 rejects the trade; guardrail blocks counter-trend trades unless force-override is used.",
     footer_guide_5: "Review the AI Self-Learning Journal after every LOSS for auto-generated structural lessons.",
     footer_copyright: "All rights reserved",
   },
   ar: {
-    app_title: "محرك التداول والذكاء الكلي الاحترافي", app_subtitle: "محرك ICT المؤسسي · الإصدار 5.0",
+    app_title: "محرك التداول والذكاء الكلي الاحترافي", app_subtitle: "محرك ICT المؤسسي · الإصدار 6.0",
     live: "مباشر", stale: "احتياطي",
     session: "الجلسة", kill_zone: "منطقة القتل", capital: "رأس المال", win_rate: "نسبة النجاح",
     active: "نشط", inactive: "غير نشط",
@@ -2539,17 +2854,43 @@ const I18N = {
     clear_confirm: "مسح جميع سجلات التعلم الذاتي؟",
     risk_on: "شهية المخاطرة", risk_off: "النفور من المخاطرة", crisis: "أزمة",
     neutral_constructive: "محايد إيجابي",
+    market_bias_title: "مؤشر انحياز السوق",
+    market_bias_subtitle: "الدولار · السندات · COT · الذهب/الفضة",
+    bias_guardrail_off: "الحماية: معطلة",
+    bias_guardrail_on: "الحماية: نشطة",
+    bias_with_trend_hint: "الأصول المتوافقة",
+    bias_strong_bull: "انحياز قوي للدولار",
+    bias_bull: "قوة معتدلة للدولار",
+    bias_neutral: "محايد",
+    bias_bear: "ضعف معتدل للدولار",
+    bias_strong_bear: "انحياز قوي ضد الدولار",
+    bias_dxy: "زخم مؤشر الدولار",
+    bias_us10y: "عائد السندات الأمريكية",
+    bias_cot: "مراكز المؤسسات",
+    bias_gsr: "نسبة الذهب/الفضة",
+    bias_pts: "نقطة",
+    bias_bull_usd: "الدولار صاعد",
+    bias_bear_usd: "الدولار هابط",
+    bias_neutral_impact: "محايد",
+    guardrail_blocked: "الصفقة محظورة بحماية الانحياز",
+    force_override: "تجاوز قسري (غير موصى به)",
+    force_confirm: "تجاوز حماية انحياز السوق؟ هذه الصفقة ضد الاتجاه الكلي.",
+    alignment_buy_bias: "الشراء مع الاتجاه",
+    alignment_sell_bias: "البيع مع الاتجاه",
+    alignment_neutral: "لا يوجد انحياز اتجاهي قوي",
+    dispatch_blocked: "الصفقة محظورة بحماية الانحياز — توافق مع الاتجاه أو استخدم التجاوز القسري",
+    dispatch_forced: "تم التنفيذ بالتجاوز القسري",
     footer_about_title: "عن التطبيق",
-    footer_about_text: "محرك التداول والذكاء الكلي الاحترافي هو منصة تحليل ICT مؤسسية. يجمع بين بيانات السوق السبوت الحقيقية (gold-api.com)، وتغذية Yahoo Finance للفوركس ومؤشر الدولار، ومحرك تقييم التوافق الفني والكلي (0-10)، ومراكز المؤسسات CFTC COT، واحتمالات البنوك المركزية، ومقياس المخاطر الكلية والجيوسياسية المباشر، والتعلم الذاتي الهيكلي. يدعم سكالبينج النمط أ (1W/1D/1H → M5)، سكالبينج النمط ب (1W/1D/4H → M15/M1)، وسوينج (H1/H4) مع إدارة صارمة لحجم المركز على أساس المخاطر.",
+    footer_about_text: "محرك التداول والذكاء الكلي الاحترافي هو منصة تحليل ICT مؤسسية. يجمع بين بيانات السوق السبوت الحقيقية (gold-api.com)، وتغذية Yahoo Finance للفوركس ومؤشر الدولار، ومحرك تقييم التوافق الفني والكلي (0-10)، ومؤشر انحياز السوق المباشر (-100 إلى +100) مع حماية الاتجاه، ومراكز المؤسسات CFTC COT، واحتمالات البنوك المركزية، ومقياس المخاطر الكلية والجيوسياسية المباشر، والتعلم الذاتي الهيكلي. يدعم سكالبينج النمط أ (1W/1D/1H → M5)، سكالبينج النمط ب (1W/1D/4H → M15/M1)، وسوينج (H1/H4) مع إدارة صارمة لحجم المركز.",
     footer_dev_title: "المطور",
     footer_dev_name: "تم التطوير بواسطة المهندس عبدالإله صادق",
     footer_dev_role: "مهندس كوانت فينتك ومعماري أنظمة التداول الخوارزمي",
     footer_dev_stack: "التقنيات: Python stdlib · SQLite · Tailwind CSS · Vanilla JS",
     footer_guide_title: "دليل الاستخدام",
     footer_guide_1: "قم بتعيين رأس المال ونسبة المخاطرة في لوحة الحساب — تُحفظ بشكل دائم في SQLite.",
-    footer_guide_2: "اختر نمط التداول (سكالبينج أ/ب أو سوينج) — يتم تعبئة تحليل الأطر العليا وإطار الدخول تلقائياً.",
-    footer_guide_3: "تحقق من درجة التوافق — الصفقات الأقل من 5/10 تُرفض لحماية رأس المال.",
-    footer_guide_4: "راقب الصفقات النشطة والمعلقة في الوقت الفعلي — يتم تقييم SL/TP تلقائياً كل 0.5 ثانية.",
+    footer_guide_2: "تحقق من مؤشر انحياز السوق في الأعلى — يحذرك قبل التداول ضد الاتجاه الكلي.",
+    footer_guide_3: "اختر نمط التداول (سكالبينج أ/ب أو سوينج) — يتم تعبئة تحليل الأطر العليا وإطار الدخول تلقائياً.",
+    footer_guide_4: "درجة التوافق أقل من 5/10 ترفض الصفقة؛ الحماية تحظر الصفقات ضد الاتجاه إلا باستخدام التجاوز القسري.",
     footer_guide_5: "راجع سجل التعلم الذاتي بعد كل خسارة للاطلاع على الدروس الهيكلية المولّدة تلقائياً.",
     footer_copyright: "جميع الحقوق محفوظة",
   }
@@ -2610,6 +2951,10 @@ const DEFAULT_DISTS = {
   "_fx":     { SCALPING_A: [0.0012, 0.0024], SCALPING_B: [0.0020, 0.0040], SWING: [0.0060, 0.0180] },
 };
 
+const ANTI_USD_SYMBOLS = ["XAU/USD", "XAG/USD", "EUR/USD", "GBP/USD"];
+const PRO_USD_SYMBOLS  = ["USD/JPY", "DXY"];
+const GUARDRAIL_THRESHOLD = 60;
+
 const state = {
   lang: "en",
   prices: {},
@@ -2624,6 +2969,7 @@ const state = {
   calendar: [],
   learning: [],
   lastConfluence: null,
+  marketBias: null,
 };
 
 function t(key) {
@@ -2678,14 +3024,16 @@ async function api(path, method = "GET", body = null) {
   try { data = await res.json(); } catch (_) {}
   if (!res.ok) {
     const err = (data && (data.error || data.detail)) || `HTTP ${res.status}`;
-    throw new Error(typeof err === "string" ? err : JSON.stringify(err));
+    const e = new Error(typeof err === "string" ? err : JSON.stringify(err));
+    e.payload = data;
+    throw e;
   }
   return data;
 }
 function setStatus(el, msg, type = "ok") {
   el.textContent = msg || "";
   el.className = "text-[11px] mt-2 h-4 " + (type === "err" ? "text-rose-400" : "text-emerald-400");
-  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 4500);
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 5000);
 }
 function sparkline(history) {
   if (!history || history.length < 2) return "";
@@ -2720,27 +3068,29 @@ function applyLanguage() {
     });
   } catch (e) { console.error("[lang] static i18n:", e); }
 
-  try { rebuildSymbolSelect(); } catch (e) { console.error("[lang] symSel:", e); }
-  try { rebuildStrategySelect(); } catch (e) { console.error("[lang] stratSel:", e); }
-  try { rebuildModeSelect(); } catch (e) { console.error("[lang] modeSel:", e); }
-  try { refreshEntryTFOptions(); } catch (e) { console.error("[lang] entryTf:", e); }
+  try { rebuildSymbolSelect(); } catch (e) { console.error(e); }
+  try { rebuildStrategySelect(); } catch (e) { console.error(e); }
+  try { rebuildModeSelect(); } catch (e) { console.error(e); }
+  try { refreshEntryTFOptions(); } catch (e) { console.error(e); }
 
-  try { if (state.pricesSnapshot) renderPrices(state.pricesSnapshot); } catch (e) { console.error("[lang] prices:", e); }
-  try { if (state.summary) renderSummary(state.summary); } catch (e) { console.error("[lang] summary:", e); }
+  try { if (state.pricesSnapshot) renderPrices(state.pricesSnapshot); } catch (e) { console.error(e); }
+  try { if (state.marketBias) renderMarketBias(state.marketBias); } catch (e) { console.error(e); }
+  try { if (state.summary) renderSummary(state.summary); } catch (e) { console.error(e); }
   try {
     if (state.trades.length) {
       renderActive(state.trades);
       renderPending(state.trades);
       renderHistory(state.trades);
     }
-  } catch (e) { console.error("[lang] trades:", e); }
-  try { if (state.strategies.length) renderStrategies(state.strategies); } catch (e) { console.error("[lang] strategies:", e); }
-  try { if (state.macro) renderMacro(state.macro); } catch (e) { console.error("[lang] macro:", e); }
-  try { if (state.cot) renderCOT(state.cot); } catch (e) { console.error("[lang] cot:", e); }
-  try { if (state.cb) renderCB(state.cb); } catch (e) { console.error("[lang] cb:", e); }
-  try { if (state.calendar.length) renderCalendar(state.calendar); } catch (e) { console.error("[lang] calendar:", e); }
-  try { if (state.learning.length) renderLearning(state.learning); } catch (e) { console.error("[lang] learning:", e); }
-  try { if (state.lastConfluence) renderConfluence(state.lastConfluence); } catch (e) { console.error("[lang] confluence:", e); }
+  } catch (e) { console.error(e); }
+  try { if (state.strategies.length) renderStrategies(state.strategies); } catch (e) { console.error(e); }
+  try { if (state.macro) renderMacro(state.macro); } catch (e) { console.error(e); }
+  try { if (state.cot) renderCOT(state.cot); } catch (e) { console.error(e); }
+  try { if (state.cb) renderCB(state.cb); } catch (e) { console.error(e); }
+  try { if (state.calendar.length) renderCalendar(state.calendar); } catch (e) { console.error(e); }
+  try { if (state.learning.length) renderLearning(state.learning); } catch (e) { console.error(e); }
+  try { if (state.lastConfluence) renderConfluence(state.lastConfluence); } catch (e) { console.error(e); }
+  try { updateGuardrail(); } catch (e) { console.error(e); }
 }
 function toggleLanguage() {
   state.lang = isAr() ? "en" : "ar";
@@ -2821,6 +3171,146 @@ function renderPrices(data) {
   document.getElementById("feedDot").className =
     liveCount > 0 ? "text-emerald-400 pulse-dot w-2 h-2 rounded-full bg-emerald-400"
                   : "text-amber-400 w-2 h-2 rounded-full bg-amber-400";
+}
+
+function renderMarketBias(bias) {
+  state.marketBias = bias;
+  const score = Number(bias.score);
+  const absScore = Math.abs(score);
+
+  const scoreEl = document.getElementById("biasScoreDisplay");
+  scoreEl.textContent = (score >= 0 ? "+" : "") + score.toFixed(1);
+
+  let scoreColor;
+  if (score >= 60) scoreColor = "text-rose-400";
+  else if (score >= 25) scoreColor = "text-amber-400";
+  else if (score <= -60) scoreColor = "text-emerald-400";
+  else if (score <= -25) scoreColor = "text-emerald-300";
+  else scoreColor = "text-slate-300";
+  scoreEl.className = "text-4xl font-black tabnum " + scoreColor;
+
+  const labelKeyMap = {
+    "bullish_usd": score >= 60 ? "bias_strong_bull" : "bias_bull",
+    "bearish_usd": score <= -60 ? "bias_strong_bear" : "bias_bear",
+    "neutral": "bias_neutral",
+  };
+  const labelKey = labelKeyMap[bias.direction] || "bias_neutral";
+  document.getElementById("biasLabelDisplay").textContent = t(labelKey);
+
+  const marker = document.getElementById("biasMarker");
+  const pct = (score + 100) / 2;
+  marker.style.left = pct + "%";
+
+  const dirEl = document.getElementById("biasDirectionDisplay");
+  let dirKey;
+  if (bias.direction === "bullish_usd") dirKey = "bias_bull_usd";
+  else if (bias.direction === "bearish_usd") dirKey = "bias_bear_usd";
+  else dirKey = "bias_neutral_impact";
+  dirEl.textContent = t(dirKey);
+
+  const badge = document.getElementById("biasGuardrailBadge");
+  if (bias.guardrail_active) {
+    badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-700/60 bias-pulse-strong";
+    badge.textContent = t("bias_guardrail_on");
+  } else {
+    badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400";
+    badge.textContent = t("bias_guardrail_off");
+  }
+
+  const trendEl = document.getElementById("biasWithTrendDisplay");
+  if (bias.guardrail_active) {
+    if (bias.direction === "bullish_usd") {
+      trendEl.textContent = isAr() ? "DXY · USD/JPY شراء" : "DXY · USD/JPY · BUY";
+      trendEl.className = "text-[11px] font-semibold text-rose-300 mt-1";
+    } else if (bias.direction === "bearish_usd") {
+      trendEl.textContent = isAr() ? "XAU · XAG · EUR · GBP شراء" : "XAU · XAG · EUR · GBP · BUY";
+      trendEl.className = "text-[11px] font-semibold text-emerald-300 mt-1";
+    } else {
+      trendEl.textContent = t("alignment_neutral");
+      trendEl.className = "text-[11px] font-semibold text-slate-400 mt-1";
+    }
+  } else {
+    trendEl.textContent = t("alignment_neutral");
+    trendEl.className = "text-[11px] font-semibold text-slate-400 mt-1";
+  }
+
+  const grid = document.getElementById("biasComponentsGrid");
+  const compI18N = {
+    "dxy": "bias_dxy",
+    "us10y": "bias_us10y",
+    "cot": "bias_cot",
+    "gsr": "bias_gsr",
+  };
+  grid.innerHTML = (bias.components || []).map(c => {
+    const pts = Number(c.points);
+    const ptsCls = pts > 5 ? "text-rose-400" : pts < -5 ? "text-emerald-400" : "text-slate-400";
+    const sign = pts >= 0 ? "+" : "";
+    return `
+      <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-2">
+        <div class="text-[9px] uppercase tracking-widest text-slate-500 truncate">${escapeHtml(t(compI18N[c.key] || c.key))}</div>
+        <div class="flex items-baseline justify-between mt-1">
+          <span class="text-[10px] text-slate-400 tabnum">${typeof c.value === "number" ? c.value.toLocaleString() : c.value}${escapeHtml(c.unit || "")}</span>
+          <span class="text-[12px] font-bold tabnum ${ptsCls}">${sign}${pts.toFixed(1)}</span>
+        </div>
+      </div>`;
+  }).join("");
+
+  updateGuardrail();
+}
+
+function computeAlignment(symbol, side, bias) {
+  if (!bias) return { blocked: false, aligned: true, with_trend_side: null, warning_en: "", warning_ar: "" };
+  const score = Number(bias.score || 0);
+  const guardrail = !!bias.guardrail_active;
+  let with_trend_side = null;
+  if (ANTI_USD_SYMBOLS.includes(symbol)) {
+    if (score < 0) with_trend_side = "BUY";
+    else if (score > 0) with_trend_side = "SELL";
+  } else if (PRO_USD_SYMBOLS.includes(symbol)) {
+    if (score > 0) with_trend_side = "BUY";
+    else if (score < 0) with_trend_side = "SELL";
+  }
+  const blocked = guardrail && with_trend_side !== null && side !== with_trend_side;
+  let warning_en = "";
+  let warning_ar = "";
+  if (blocked) {
+    const tw_en = with_trend_side === "BUY" ? "bullish" : "bearish";
+    const tw_ar = with_trend_side === "BUY" ? "صاعد" : "هابط";
+    const side_ar = side === "BUY" ? "الشراء" : "البيع";
+    warning_en = `Market Bias Score is ${score >= 0 ? "+" : ""}${score.toFixed(1)} — strong ${tw_en} pressure on ${symbol}. Your ${side} is counter-trend. Choose ${with_trend_side} to align.`;
+    warning_ar = `درجة انحياز السوق ${score >= 0 ? "+" : ""}${score.toFixed(1)} — ضغط ${tw_ar} قوي على ${symbol}. ${side_ar} عكس الاتجاه. اختر ${with_trend_side} للتوافق.`;
+  }
+  return {
+    blocked,
+    aligned: !blocked,
+    with_trend_side,
+    warning_en,
+    warning_ar,
+  };
+}
+
+function updateGuardrail() {
+  if (!state.marketBias) return;
+  const sym = document.getElementById("selSymbol").value;
+  const side = document.getElementById("selSide").value;
+  const align = computeAlignment(sym, side, state.marketBias);
+  const banner = document.getElementById("guardrailBanner");
+  const btnDispatch = document.getElementById("btnDispatch");
+  const btnForce = document.getElementById("btnForceOverride");
+  const guardrailText = document.getElementById("guardrailText");
+
+  if (align.blocked) {
+    banner.classList.remove("hidden");
+    guardrailText.textContent = isAr() ? align.warning_ar : align.warning_en;
+    btnDispatch.disabled = true;
+    btnDispatch.classList.add("opacity-40", "cursor-not-allowed");
+    btnForce.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+    btnDispatch.disabled = false;
+    btnDispatch.classList.remove("opacity-40", "cursor-not-allowed");
+    btnForce.classList.add("hidden");
+  }
 }
 
 function renderSummary(s) {
@@ -3223,6 +3713,7 @@ function applyDefaults() {
     inp.classList.remove("opacity-60");
   }
   updateLotPreview();
+  updateGuardrail();
   refreshConfluence();
 }
 function updateLotPreview() {
@@ -3259,7 +3750,7 @@ async function saveSettings() {
   } catch (e) { setStatus(st, e.message, "err"); }
 }
 
-async function dispatchTrade() {
+async function dispatchTrade(force = false) {
   const st = document.getElementById("dispatchStatus");
   const sym = document.getElementById("selSymbol").value;
   const side = document.getElementById("selSide").value;
@@ -3277,14 +3768,18 @@ async function dispatchTrade() {
     symbol: sym, side, mode, entry_type: entryType,
     entry_timeframe: entryTF, strategy: strat,
     stop_loss: sl, take_profit: tp,
+    force: !!force,
   };
   if (entryType === "LIMIT") payload.entry_price = entry;
   try {
     const r = await api("/api/trades", "POST", payload);
-    setStatus(st, `${t("dispatch_ok")} #${r.data.id} · lot ${r.data.lot_size} · score ${r.confluence.score}/10`, "ok");
+    const suffix = force ? ` · ${t("dispatch_forced")}` : "";
+    setStatus(st, `${t("dispatch_ok")} #${r.data.id} · lot ${r.data.lot_size} · score ${r.confluence.score}/10${suffix}`, "ok");
     renderConfluence(r.confluence);
+    if (r.bias) renderMarketBias(r.bias);
     pollTrades(); pollSummary(); pollStrategies(); pollLearning();
   } catch (e) {
+    if (e.payload && e.payload.bias) renderMarketBias(e.payload.bias);
     setStatus(st, e.message, "err");
   }
 }
@@ -3296,6 +3791,7 @@ async function dispatchAuto() {
     const r = await api("/api/auto_dispatch", "POST", { mode });
     setStatus(st, `${t("auto_ok")} #${r.data.id} · ${r.data.symbol} ${r.data.side} · ${r.data.entry_timeframe} · score ${r.confluence.score}/10`, "ok");
     renderConfluence(r.confluence);
+    if (r.bias) renderMarketBias(r.bias);
     pollTrades(); pollSummary(); pollStrategies(); pollLearning();
   } catch (e) {
     setStatus(st, e.message, "err");
@@ -3324,6 +3820,12 @@ async function pollPrices() {
       }
     }
   } catch (e) { console.error("prices:", e); }
+}
+async function pollMarketBias() {
+  try {
+    const r = await api("/api/market_bias");
+    renderMarketBias(r.data);
+  } catch (e) { console.error("bias:", e); }
 }
 async function pollSummary() {
   try { const r = await api("/api/summary"); state.summary = r.data; renderSummary(r.data); }
@@ -3391,12 +3893,16 @@ async function boot() {
   document.getElementById("inpSL").addEventListener("input", updateLotPreview);
   document.getElementById("inpTP").addEventListener("input", updateLotPreview);
   document.getElementById("btnSaveSettings").addEventListener("click", saveSettings);
-  document.getElementById("btnDispatch").addEventListener("click", dispatchTrade);
+  document.getElementById("btnDispatch").addEventListener("click", () => dispatchTrade(false));
   document.getElementById("btnAutoDispatch").addEventListener("click", dispatchAuto);
   document.getElementById("btnClearLearn").addEventListener("click", clearLearning);
+  document.getElementById("btnForceOverride").addEventListener("click", () => {
+    if (!confirm(t("force_confirm"))) return;
+    dispatchTrade(true);
+  });
 
   await Promise.all([
-    pollPrices(), pollSummary(), pollStrategies(),
+    pollPrices(), pollMarketBias(), pollSummary(), pollStrategies(),
     pollMacro(), pollCOT(), pollCB(), pollCalendar(),
     pollTrades(), pollLearning()
   ]);
@@ -3404,6 +3910,7 @@ async function boot() {
   refreshConfluence();
 
   priceLoop();
+  setInterval(pollMarketBias, 2000);
   setInterval(pollSummary, 3000);
   setInterval(pollTrades, 2500);
   setInterval(pollStrategies, 5000);
@@ -3434,6 +3941,7 @@ def main():
     init_db()
     print(f"[startup] DB: {DB_PATH}", flush=True)
     print(f"[startup] Listening on http://{HOST}:{PORT}", flush=True)
+    print(f"[startup] Market Bias Guardrail threshold: ±{BIAS_GUARDRAIL_THRESHOLD}", flush=True)
 
     threads = [
         threading.Thread(target=price_feed_loop,   daemon=True, name="price_feed"),
