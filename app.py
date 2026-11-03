@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Pro Trading & Macro Intelligence Engine v7.0
+Pro Trading & Macro Intelligence Engine v7.1
 =============================================
 Single-file production server (Python stdlib only).
 
-NEW in v7.0:
+NEW in v7.1:
+  • DXY excluded from trading (display + bias only)
+  • High-impact news blackout: stops trading 5 min before → resumes 10 min after
+
+PRESERVED from v7.0:
   • 3 Trading Modes: Manual / Single-Click / Continuous Auto-Pilot
   • Session Liquidity Filter (High/Moderate/Weak/Closed) — blocks trades
   • Market Closed Detection with live weekend countdown timer
-
-PRESERVED from v6.0:
   • ./data/trading_engine.db persistence
   • gold-api.com spot + Yahoo Finance FX/DXY (1s refresh)
-  • DXY fully tradeable (inverse COT + VIX branch)
   • Market Bias Index (-100 to +100) with directional guardrail
   • AI self-learning on every LOSS
   • Full bilingual AR/EN UI
@@ -41,7 +42,7 @@ from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 
 # ============================================================================
-# CONFIGURATION — ./data/trading_engine.db
+# CONFIGURATION
 # ============================================================================
 DB_PATH = os.environ.get("DB_PATH", os.path.join("data", "trading_engine.db"))
 _db_dir = os.path.dirname(DB_PATH)
@@ -110,6 +111,9 @@ SYMBOLS = {
                 "spread": 0.020, "label_en": "Dollar Index", "label_ar": "مؤشر الدولار"},
 }
 
+# ★ v7.1: DXY is display-only (used for bias) — never tradeable
+TRADEABLE_SYMBOLS = frozenset({"XAU/USD", "XAG/USD", "EUR/USD", "GBP/USD", "USD/JPY"})
+
 PRICE_BOUNDS = {
     "XAU/USD": (1000.0, 6000.0), "XAG/USD": (5.0, 200.0),
     "EUR/USD": (0.50, 2.00), "GBP/USD": (0.70, 2.50),
@@ -153,6 +157,10 @@ STRATEGY_AR = {
 
 ANTI_USD_SYMBOLS = ("XAU/USD", "XAG/USD", "EUR/USD", "GBP/USD")
 PRO_USD_SYMBOLS  = ("USD/JPY", "DXY")
+
+# ★ v7.1: News blackout configuration
+NEWS_BLACKOUT_BEFORE_MIN = 5   # block 5 minutes before HIGH-impact release
+NEWS_BLACKOUT_AFTER_MIN  = 10  # resume 10 minutes after HIGH-impact release
 
 # ============================================================================
 # LIVE PRICE STATE
@@ -244,6 +252,18 @@ CALENDAR_SEED = [
     {"month": 5, "day": 19, "event_en": "German ZEW Sentiment", "event_ar": "مؤشر ZEW الألماني", "currency": "EUR", "impact": "LOW", "forecast": "14.0", "previous": "13.0"},
 ]
 
+# ★ v7.1: Realistic UTC release times (hour, minute) for high-impact events
+EVENT_TIME_MAP = {
+    "FOMC Rate Decision":     (18, 0),
+    "US Non-Farm Payrolls":   (12, 30),
+    "US CPI YoY":             (12, 30),
+    "ECB Press Conference":   (12, 45),
+    "BoE Bank Rate":          (11, 0),
+    "BoJ Policy Statement":   (3, 0),
+    "US Retail Sales MoM":    (12, 30),
+    "German ZEW Sentiment":   (9, 0),
+}
+
 # ============================================================================
 # HELPERS
 # ============================================================================
@@ -285,7 +305,7 @@ def geo_risk_label(v: float) -> str:
     return "Low"
 
 # ============================================================================
-# ★ MARKET STATUS & LIQUIDITY
+# ★ MARKET STATUS & LIQUIDITY (v7.1 adds NEWS BLACKOUT)
 # ============================================================================
 def get_next_sunday_2200(now: datetime) -> datetime:
     """Compute next Sunday 22:00 UTC strictly after `now`."""
@@ -298,16 +318,49 @@ def get_next_sunday_2200(now: datetime) -> datetime:
     target = now + timedelta(days=days_to_sunday)
     return target.replace(hour=22, minute=0, second=0, microsecond=0)
 
+def get_news_blackout() -> dict:
+    """
+    v7.1: Detect HIGH-impact news blackout window:
+      • Blocks trading 5 min BEFORE release
+      • Resumes 10 min AFTER release
+    Only HIGH-impact events trigger the blackout.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        events = build_calendar()
+    except Exception:
+        return {"active": False}
+    for e in events:
+        if e.get("impact") != "HIGH":
+            continue
+        try:
+            when = datetime.fromisoformat(e["when"])
+        except (ValueError, TypeError, KeyError):
+            continue
+        blackout_start = when - timedelta(minutes=NEWS_BLACKOUT_BEFORE_MIN)
+        blackout_end   = when + timedelta(minutes=NEWS_BLACKOUT_AFTER_MIN)
+        if blackout_start <= now <= blackout_end:
+            return {
+                "active": True,
+                "event_en": e.get("event_en", ""),
+                "event_ar": e.get("event_ar", ""),
+                "currency": e.get("currency", ""),
+                "impact": e.get("impact", "HIGH"),
+                "when": e.get("when"),
+                "blackout_start": blackout_start.isoformat(),
+                "blackout_end": blackout_end.isoformat(),
+                "resume_in_sec": max(0, int((blackout_end - now).total_seconds())),
+            }
+    return {"active": False}
+
+
 def compute_market_status() -> dict:
     """
     Market schedule (forex/gold standard):
       • Weekend closure: Friday 21:00 UTC → Sunday 22:00 UTC
       • Daily break:     Mon-Thu 21:00-22:00 UTC (thin liquidity)
-    Liquidity classification:
-      • high:     London 07-12 UTC + Overlap 12-16 UTC
-      • moderate: Tokyo 00-07 UTC, NY 16-20 UTC, Sydney 22-24 UTC
-      • weak:     Mon-Thu 20-22 UTC (NY close / pre-Sydney)
-      • closed:   weekend / daily break
+    v7.1 adds:
+      • High-impact news blackout: blocks 5 min before → 10 min after
     """
     now = datetime.now(timezone.utc)
     weekday = now.weekday()  # Mon=0, ..., Fri=4, Sat=5, Sun=6
@@ -337,6 +390,16 @@ def compute_market_status() -> dict:
     if not is_closed and weekday < 4 and hour == 21:
         is_daily_break = True
         next_open = now.replace(hour=22, minute=0, second=0, microsecond=0)
+
+    # ---- ★ NEW: High-impact news blackout ----
+    news = get_news_blackout()
+
+    if news["active"] and not is_closed and not is_daily_break:
+        # Market would be open, but news pause is in effect
+        try:
+            next_open = datetime.fromisoformat(news["blackout_end"])
+        except (ValueError, KeyError):
+            pass
 
     # ---- Countdown ----
     countdown_sec = 0
@@ -372,13 +435,19 @@ def compute_market_status() -> dict:
         liq_level = "moderate"
         liq_session = "Off-Hours"
 
-    allow_trades = liq_level in ("high", "moderate")
+    allow_trades    = liq_level in ("high", "moderate")
     allow_autopilot = liq_level == "high"
 
+    # ★ News blackout overrides everything trade-wise (but not already-closed states)
+    if news["active"]:
+        allow_trades = False
+        allow_autopilot = False
+
     return {
-        "is_open": not is_closed and not is_daily_break,
+        "is_open": (not is_closed) and (not is_daily_break) and (not news["active"]),
         "is_closed": is_closed,
         "is_daily_break": is_daily_break,
+        "news_blackout": news,
         "reason": reason,
         "next_open": next_open.isoformat() if next_open else None,
         "countdown_sec": countdown_sec,
@@ -541,7 +610,6 @@ def init_db():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_learning_created ON self_learning(created_at)")
 
-            # ---- Trade table migrations ----
             trade_cols = [r["name"] for r in cur.execute("PRAGMA table_info(trades)").fetchall()]
             for col, ddl in [
                 ("confluence_score", "ALTER TABLE trades ADD COLUMN confluence_score REAL DEFAULT 0"),
@@ -552,7 +620,6 @@ def init_db():
                 if col not in trade_cols:
                     cur.execute(ddl)
 
-            # ---- Bot settings migrations for auto-pilot ----
             settings_cols = [r["name"] for r in cur.execute("PRAGMA table_info(bot_settings)").fetchall()]
             for col, ddl in [
                 ("autopilot_enabled", "ALTER TABLE bot_settings ADD COLUMN autopilot_enabled INTEGER DEFAULT 0"),
@@ -821,13 +888,14 @@ def build_calendar():
     now = datetime.now(timezone.utc)
     out = []
     for item in CALENDAR_SEED:
+        h, m = EVENT_TIME_MAP.get(item["event_en"], (12, 0))
         try:
-            candidate = datetime(now.year, item["month"], item["day"], 12, 0, 0, tzinfo=timezone.utc)
+            candidate = datetime(now.year, item["month"], item["day"], h, m, 0, tzinfo=timezone.utc)
         except ValueError:
             continue
         if candidate < now - timedelta(days=1):
             try:
-                candidate = datetime(now.year + 1, item["month"], item["day"], 12, 0, 0, tzinfo=timezone.utc)
+                candidate = datetime(now.year + 1, item["month"], item["day"], h, m, 0, tzinfo=timezone.utc)
             except ValueError:
                 continue
         out.append({
@@ -1247,7 +1315,7 @@ def trade_evaluator():
         SHUTDOWN.wait(0.5)
 
 # ============================================================================
-# ★ AUTO-PILOT LOOP
+# AUTO-PILOT LOOP
 # ============================================================================
 def get_autopilot_settings():
     r = db_query_one("SELECT autopilot_enabled, autopilot_cooldown_sec, autopilot_max_concurrent, autopilot_min_score FROM bot_settings WHERE id=1")
@@ -1271,7 +1339,8 @@ def find_best_autopilot_setup(bias, min_score):
             h = PRICES[sym]["history"]
             if len(h) < 5: return 0.0
             return (max(h) - min(h)) / max(min(h), 1e-9)
-        ranked_symbols = sorted(SYMBOLS.keys(), key=vol_pct, reverse=True)
+        # ★ v7.1: only iterate tradeable symbols (DXY excluded)
+        ranked_symbols = sorted(TRADEABLE_SYMBOLS, key=vol_pct, reverse=True)
 
     for sym in ranked_symbols:
         existing = db_query_one(
@@ -1333,7 +1402,11 @@ def autopilot_loop():
 
             ms = compute_market_status()
             if not ms["is_open"]:
-                _last_autopilot_status = "market_closed"
+                # ★ v7.1: distinguish news blackout from market closure
+                if ms.get("news_blackout", {}).get("active"):
+                    _last_autopilot_status = "news_blackout"
+                else:
+                    _last_autopilot_status = "market_closed"
                 SHUTDOWN.wait(15.0)
                 continue
 
@@ -1375,7 +1448,7 @@ def autopilot_loop():
 # HTTP HANDLER
 # ============================================================================
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ProTradingEngine/7.0"
+    server_version = "ProTradingEngine/7.1"
 
     def log_message(self, fmt, *args):
         pass
@@ -1429,7 +1502,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/health":
                 self._json({"ok": True, "time": now_iso(), "session": active_session(),
-                            "kill_zone": is_kill_zone(), "version": "7.0", "db_path": DB_PATH})
+                            "kill_zone": is_kill_zone(), "version": "7.1", "db_path": DB_PATH})
                 return
 
             if path == "/api/config":
@@ -1439,10 +1512,13 @@ class Handler(BaseHTTPRequestHandler):
                                             "yahoo": c["yahoo"], "spot_code": c["spot_code"],
                                             "metals_spot": c["metals_spot"]}
                                         for s, c in SYMBOLS.items()},
+                            "tradeable_symbols": sorted(TRADEABLE_SYMBOLS),
                             "modes": TRADE_MODES, "strategies": ICT_STRATEGIES, "strategy_ar": STRATEGY_AR,
                             "anti_usd_symbols": list(ANTI_USD_SYMBOLS),
                             "pro_usd_symbols": list(PRO_USD_SYMBOLS),
-                            "guardrail_threshold": BIAS_GUARDRAIL_THRESHOLD})
+                            "guardrail_threshold": BIAS_GUARDRAIL_THRESHOLD,
+                            "news_blackout_before_min": NEWS_BLACKOUT_BEFORE_MIN,
+                            "news_blackout_after_min": NEWS_BLACKOUT_AFTER_MIN})
                 return
 
             if path == "/api/prices":
@@ -1463,6 +1539,7 @@ class Handler(BaseHTTPRequestHandler):
                             "history": [round(x, c["decimals"]) for x in st["history"][-40:]],
                             "last_update": st["last_update"],
                             "source": st["source"], "stale": st["stale"],
+                            "tradeable": s in TRADEABLE_SYMBOLS,
                         }
                 self._json({"ok": True, "data": data}); return
 
@@ -1623,6 +1700,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "last_update": PRICES[s]["last_update"],
                                 "yahoo_ticker": c["yahoo"], "spot_code": c["spot_code"],
                                 "metals_spot": c["metals_spot"],
+                                "tradeable": s in TRADEABLE_SYMBOLS,
                                 "price": round(PRICES[s]["price"], c["decimals"])}
                             for s, c in SYMBOLS.items()}
                 self._json({"ok": True, "data": data}); return
@@ -1686,6 +1764,13 @@ class Handler(BaseHTTPRequestHandler):
                 force_override = bool(body.get("force", False))
 
                 if symbol not in SYMBOLS: self._json({"ok": False, "error": f"unknown symbol {symbol}"}, 400); return
+
+                # ★ v7.1: DXY is not tradeable
+                if symbol not in TRADEABLE_SYMBOLS:
+                    self._json({"ok": False,
+                                "error": f"{symbol} is display-only — not tradeable (used only for bias calculation)"}, 400)
+                    return
+
                 if side not in ("BUY", "SELL"): self._json({"ok": False, "error": "side must be BUY/SELL"}, 400); return
                 if entry_type not in ("MARKET", "LIMIT"): self._json({"ok": False, "error": "entry_type invalid"}, 400); return
                 if mode not in TRADE_MODES: self._json({"ok": False, "error": f"unknown mode {mode}"}, 400); return
@@ -1694,22 +1779,28 @@ class Handler(BaseHTTPRequestHandler):
                 if entry_tf not in TRADE_MODES[mode]["entry_tfs"]:
                     self._json({"ok": False, "error": f"entry tf {entry_tf} invalid"}, 400); return
 
-                # ★ GUARDRAIL 1: MARKET CLOSED ★
+                # ★ GUARDRAIL 1: MARKET CLOSED or NEWS BLACKOUT (hard block)
                 ms = compute_market_status()
                 if not ms["is_open"]:
-                    self._json({"ok": False,
-                                "error": "Market is closed — cannot open new trades",
-                                "market_status": ms}, 400)
+                    if ms.get("news_blackout", {}).get("active"):
+                        nb = ms["news_blackout"]
+                        self._json({"ok": False,
+                                    "error": f"News blackout active: {nb.get('event_en','')} ({nb.get('currency','')}) — resumes in {nb.get('resume_in_sec',0)//60} min",
+                                    "market_status": ms}, 400)
+                    else:
+                        self._json({"ok": False,
+                                    "error": "Market is closed — cannot open new trades",
+                                    "market_status": ms}, 400)
                     return
 
-                # ★ GUARDRAIL 2: LIQUIDITY ★
+                # ★ GUARDRAIL 2: LIQUIDITY
                 if not ms["liquidity"]["allow_trades"] and not force_override:
                     self._json({"ok": False,
                                 "error": f"Liquidity is {ms['liquidity']['level']} — trade blocked. Use force override if absolutely required.",
                                 "market_status": ms}, 400)
                     return
 
-                # ★ GUARDRAIL 3: MARKET BIAS ★
+                # ★ GUARDRAIL 3: MARKET BIAS
                 bias = compute_market_bias()
                 align = symbol_alignment(symbol, side, bias)
                 if align["blocked"] and not force_override:
@@ -1784,7 +1875,11 @@ class Handler(BaseHTTPRequestHandler):
 
                 ms = compute_market_status()
                 if not ms["is_open"]:
-                    self._json({"ok": False, "error": "Market is closed", "market_status": ms}, 400); return
+                    if ms.get("news_blackout", {}).get("active"):
+                        self._json({"ok": False, "error": "News blackout active", "market_status": ms}, 400)
+                    else:
+                        self._json({"ok": False, "error": "Market is closed", "market_status": ms}, 400)
+                    return
                 if not ms["liquidity"]["allow_trades"]:
                     self._json({"ok": False, "error": f"Liquidity {ms['liquidity']['level']} — auto-dispatch blocked",
                                 "market_status": ms}, 400); return
@@ -1879,7 +1974,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pro Trading &amp; Macro Intelligence Engine v7.0</title>
+<title>Pro Trading &amp; Macro Intelligence Engine v7.1</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1889,8 +1984,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     background: radial-gradient(1500px 750px at 12% -12%, #0b1b3d 0%, #05091a 42%, #020308 100%); }
   html[dir="rtl"] body { font-family: 'Cairo', 'Inter', sans-serif; }
   html[dir="rtl"] table { direction: rtl; }
-  html[dir="rtl"] .text-left { text-align: right; }
-  html[dir="rtl"] .text-right { text-align: left; }
   .tabnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
   .card { background: linear-gradient(180deg, rgba(15,23,42,0.88) 0%, rgba(2,6,23,0.84) 100%);
     border: 1px solid rgba(59,130,246,0.14); box-shadow: 0 8px 32px -8px rgba(0,0,0,0.55);
@@ -1908,7 +2001,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
   ::-webkit-scrollbar-track { background: #0b1220; }
   ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 8px; }
   .glow-blue { box-shadow: 0 0 26px -6px rgba(56,189,248,0.70); }
-  .glow-green { box-shadow: 0 0 26px -6px rgba(16,185,129,0.70); }
   .stripe-row:nth-child(odd) { background: rgba(15,23,42,0.35); }
   .stripe-row:hover { background: rgba(30,64,175,0.14); }
   select, input { outline: none; }
@@ -1938,6 +2030,10 @@ INDEX_HTML = r"""<!DOCTYPE html>
     border: 1px solid rgba(239,68,68,0.5); animation: closedPulse 3s ease-in-out infinite; }
   @keyframes closedPulse { 0%, 100% { box-shadow: 0 0 20px -8px rgba(239,68,68,0.3); }
     50% { box-shadow: 0 0 40px -8px rgba(239,68,68,0.7); } }
+  .news-banner { background: linear-gradient(135deg, rgba(154,52,18,0.85) 0%, rgba(180,83,9,0.75) 100%);
+    border: 1px solid rgba(251,146,60,0.6); animation: newsPulse 2.4s ease-in-out infinite; }
+  @keyframes newsPulse { 0%, 100% { box-shadow: 0 0 20px -8px rgba(251,146,60,0.4); }
+    50% { box-shadow: 0 0 40px -8px rgba(251,146,60,0.8); } }
 </style>
 </head>
 <body class="text-slate-200 min-h-screen">
@@ -1948,7 +2044,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 via-blue-600 to-indigo-700 flex items-center justify-center font-black text-lg shadow-lg glow-blue">P</div>
       <div>
         <div class="text-[15px] font-bold tracking-tight text-white" data-i18n="app_title">Pro Trading &amp; Macro Intelligence</div>
-        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v7.0</div>
+        <div class="text-[10px] uppercase tracking-[0.22em] text-slate-500" data-i18n="app_subtitle">Institutional ICT Engine · v7.1</div>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -1974,7 +2070,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
   </div>
 </header>
 
-<!-- ★ MARKET STATUS BANNER ★ -->
+<!-- ★ MARKET STATUS BANNER (includes news blackout) ★ -->
 <div id="marketBanner" class="max-w-[1750px] mx-auto px-4 mt-4 hidden">
   <div id="marketBannerInner" class="rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
     <div class="flex items-center gap-3">
@@ -1985,7 +2081,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       </div>
     </div>
     <div id="msCountdownBox" class="hidden text-right">
-      <div class="text-[10px] uppercase tracking-widest text-slate-300" data-i18n="reopens_in">Reopens in</div>
+      <div id="msCountdownLabel" class="text-[10px] uppercase tracking-widest text-slate-300" data-i18n="reopens_in">Reopens in</div>
       <div id="msCountdown" class="text-2xl font-black font-mono tabnum text-white">00:00:00</div>
     </div>
   </div>
@@ -2160,7 +2256,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- ★ AUTO-PILOT STATUS PANEL ★ -->
   <section id="autopilotPanel" class="card rounded-xl p-5 hidden">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div class="flex items-center gap-2">
@@ -2422,7 +2517,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
         <span class="text-xl">ℹ️</span>
         <h4 class="text-[11px] font-bold text-sky-400 uppercase tracking-[0.22em]" data-i18n="footer_about_title">About Engine</h4>
       </div>
-      <p class="text-[12px] text-slate-400 leading-relaxed" data-i18n="footer_about_text">Institutional ICT analysis with real spot feed, 3 trading modes (Manual/Single-Click/Auto-Pilot), live Session Liquidity filter, Market Closed countdown, Market Bias Index (-100/+100) with directional guardrail, COT positioning, and AI self-learning on losses.</p>
+      <p class="text-[12px] text-slate-400 leading-relaxed" data-i18n="footer_about_text">Institutional ICT analysis with real spot feed, 3 trading modes (Manual/Single-Click/Auto-Pilot), live Session Liquidity filter, Market Closed countdown, High-impact News Blackout (5 min before / 10 min after), Market Bias Index (-100/+100) with directional guardrail, COT positioning, and AI self-learning on losses. DXY is display-only (not tradeable).</p>
     </div>
     <div class="footer-tile rounded-xl p-5">
       <div class="flex items-center gap-2 mb-3">
@@ -2441,8 +2536,8 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <ul class="text-[12px] text-slate-400 space-y-2">
         <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">1.</span><span data-i18n="footer_guide_1">Set Capital and Risk% — saved permanently to SQLite.</span></li>
         <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">2.</span><span data-i18n="footer_guide_2">Choose Manual / Single-Click mode, or enable Continuous Auto-Pilot for fully hands-free trading.</span></li>
-        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">3.</span><span data-i18n="footer_guide_3">Trades are blocked if the market is closed or liquidity is weak — check the top banner.</span></li>
-        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">4.</span><span data-i18n="footer_guide_4">The Market Bias Index warns against counter-trend trades unless force-override is used.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">3.</span><span data-i18n="footer_guide_3">Trades are blocked if the market is closed, liquidity is weak, or a high-impact news event is imminent.</span></li>
+        <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">4.</span><span data-i18n="footer_guide_4">DXY is display-only (used for bias) — cannot be traded.</span></li>
         <li class="flex gap-2"><span class="text-sky-400 font-bold shrink-0">5.</span><span data-i18n="footer_guide_5">Review the AI Self-Learning Journal after every LOSS for structural lessons.</span></li>
       </ul>
     </div>
@@ -2457,7 +2552,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
 <script>
 const I18N = {
   en: {
-    app_title: "Pro Trading & Macro Intelligence", app_subtitle: "Institutional ICT Engine · v7.0",
+    app_title: "Pro Trading & Macro Intelligence", app_subtitle: "Institutional ICT Engine · v7.1",
     live: "LIVE", stale: "FALLBACK", session: "Session", capital: "Capital", win_rate: "Win Rate",
     active: "ACTIVE", inactive: "INACTIVE",
     live_market_feed: "Live Market Feed", feed_sub: "Real spot feed (gold-api.com) + Yahoo Finance · 1-second refresh",
@@ -2510,7 +2605,8 @@ const I18N = {
     liq_unknown: "—", liq_high: "High Liquidity", liq_moderate: "Moderate Liquidity",
     liq_weak: "Weak Liquidity", liq_closed: "Market Closed",
     market_open: "Market Open", market_closed: "Market is Closed", weekend_break: "Weekend Break",
-    daily_break: "Daily Break", reopens_in: "Reopens in",
+    daily_break: "Daily Break", reopens_in: "Reopens in", resumes_in: "Resumes in",
+    news_blackout: "High-Impact News Blackout",
     autopilot_status_title: "Auto-Pilot Running", autopilot_status_subtitle: "Background engine scanning for setups",
     disable_ap: "Disable", ap_min_score: "Min Score", ap_max_concurrent: "Max Concurrent",
     ap_cooldown: "Cooldown (s)", ap_active_trades: "Active Trades",
@@ -2518,20 +2614,20 @@ const I18N = {
     ap_enabled_msg: "Auto-Pilot enabled", ap_disabled_msg: "Auto-Pilot disabled",
     ap_scanning: "Scanning", ap_waiting: "Waiting",
     footer_about_title: "About Engine",
-    footer_about_text: "Institutional ICT analysis with real spot feed, 3 trading modes (Manual/Single-Click/Auto-Pilot), live Session Liquidity filter, Market Closed countdown, Market Bias Index (-100/+100) with directional guardrail, COT positioning, and AI self-learning on losses.",
+    footer_about_text: "Institutional ICT analysis with real spot feed, 3 trading modes (Manual/Single-Click/Auto-Pilot), live Session Liquidity filter, Market Closed countdown, High-impact News Blackout (5 min before / 10 min after), Market Bias Index (-100/+100) with directional guardrail, COT positioning, and AI self-learning on losses. DXY is display-only (not tradeable).",
     footer_dev_title: "Developer", footer_dev_name: "Built by Eng. Abdulelah Sadeq",
     footer_dev_role: "Quantitative FinTech & Algorithmic Trading Systems Architect",
     footer_dev_stack: "Stack: Python stdlib · SQLite · Tailwind CSS · Vanilla JS",
     footer_guide_title: "User Guide",
     footer_guide_1: "Set Capital and Risk% — saved permanently to SQLite.",
     footer_guide_2: "Choose Manual / Single-Click mode, or enable Continuous Auto-Pilot for fully hands-free trading.",
-    footer_guide_3: "Trades are blocked if the market is closed or liquidity is weak — check the top banner.",
-    footer_guide_4: "The Market Bias Index warns against counter-trend trades unless force-override is used.",
+    footer_guide_3: "Trades are blocked if the market is closed, liquidity is weak, or a high-impact news event is imminent.",
+    footer_guide_4: "DXY is display-only (used for bias) — cannot be traded.",
     footer_guide_5: "Review the AI Self-Learning Journal after every LOSS for structural lessons.",
     footer_copyright: "All rights reserved",
   },
   ar: {
-    app_title: "محرك التداول والذكاء الكلي الاحترافي", app_subtitle: "محرك ICT المؤسسي · الإصدار 7.0",
+    app_title: "محرك التداول والذكاء الكلي الاحترافي", app_subtitle: "محرك ICT المؤسسي · الإصدار 7.1",
     live: "مباشر", stale: "احتياطي", session: "الجلسة", capital: "رأس المال", win_rate: "نسبة النجاح",
     active: "نشط", inactive: "غير نشط",
     live_market_feed: "تغذية السوق المباشرة", feed_sub: "تغذية سبوت + Yahoo Finance · تحديث كل ثانية",
@@ -2583,7 +2679,8 @@ const I18N = {
     liq_unknown: "—", liq_high: "سيولة عالية", liq_moderate: "سيولة متوسطة",
     liq_weak: "سيولة ضعيفة", liq_closed: "السوق مغلق",
     market_open: "السوق مفتوح", market_closed: "السوق مغلق", weekend_break: "عطلة نهاية الأسبوع",
-    daily_break: "استراحة يومية", reopens_in: "يفتح خلال",
+    daily_break: "استراحة يومية", reopens_in: "يفتح خلال", resumes_in: "يستأنف خلال",
+    news_blackout: "توقف الأخبار المؤثرة",
     autopilot_status_title: "الطيار الآلي يعمل", autopilot_status_subtitle: "المحرك الخلفي يبحث عن إعدادات",
     disable_ap: "تعطيل", ap_min_score: "أدنى درجة", ap_max_concurrent: "أقصى صفقات",
     ap_cooldown: "تبريد (ث)", ap_active_trades: "الصفقات النشطة",
@@ -2591,15 +2688,15 @@ const I18N = {
     ap_enabled_msg: "تم تفعيل الطيار الآلي", ap_disabled_msg: "تم تعطيل الطيار الآلي",
     ap_scanning: "جاري المسح", ap_waiting: "في الانتظار",
     footer_about_title: "عن التطبيق",
-    footer_about_text: "تحليل ICT مؤسسي مع تغذية سبوت حقيقية، 3 أنماط تداول (يدوي/نقرة واحدة/طيار آلي)، مرشح سيولة الجلسات، عد تنازلي لإغلاق السوق، مؤشر انحياز السوق (-100/+100)، COT، وتعلم ذاتي على الخسائر.",
+    footer_about_text: "تحليل ICT مؤسسي مع تغذية سبوت حقيقية، 3 أنماط تداول (يدوي/نقرة واحدة/طيار آلي)، مرشح سيولة الجلسات، عد تنازلي لإغلاق السوق، توقف الأخبار المؤثرة (5 دقائق قبل/10 دقائق بعد)، مؤشر انحياز السوق، COT، وتعلم ذاتي. الدولار DXY للعرض فقط (غير قابل للتداول).",
     footer_dev_title: "المطور", footer_dev_name: "تم التطوير بواسطة المهندس عبدالإله صادق",
     footer_dev_role: "مهندس كوانت فينتك ومعماري أنظمة التداول الخوارزمي",
     footer_dev_stack: "التقنيات: Python stdlib · SQLite · Tailwind · JS",
     footer_guide_title: "دليل الاستخدام",
     footer_guide_1: "قم بتعيين رأس المال والمخاطرة — محفوظ في SQLite.",
     footer_guide_2: "اختر يدوي / نقرة واحدة، أو فعّل الطيار الآلي للتداول التلقائي الكامل.",
-    footer_guide_3: "الصفقات محظورة إذا كان السوق مغلقاً أو السيولة ضعيفة — راقب الشريط العلوي.",
-    footer_guide_4: "مؤشر الانحياز يحذر من الصفقات ضد الاتجاه ما لم يتم استخدام التجاوز القسري.",
+    footer_guide_3: "الصفقات محظورة إذا كان السوق مغلقاً أو السيولة ضعيفة أو هناك خبر مؤثر قريب.",
+    footer_guide_4: "DXY للعرض فقط (يستخدم للانحياز) — لا يمكن التداول عليه.",
     footer_guide_5: "راجع سجل التعلم الذاتي بعد كل خسارة للدروس الهيكلية.",
     footer_copyright: "جميع الحقوق محفوظة",
   }
@@ -2632,6 +2729,9 @@ const SYMBOLS = {
   "USD/JPY": { decimals: 3, mult: 1000, pip: 0.01, label_en: "Yen", label_ar: "الين" },
   "DXY": { decimals: 3, mult: 1000, pip: 0.01, label_en: "Dollar Index", label_ar: "مؤشر الدولار" },
 };
+
+// ★ v7.1: DXY excluded from trade dropdown
+const TRADEABLE_SYMBOL_KEYS = ["XAU/USD", "XAG/USD", "EUR/USD", "GBP/USD", "USD/JPY"];
 
 const MODES = {
   SCALPING_A: { htf: ["1W", "1D", "1H"], entry_tfs: ["M5"] },
@@ -2686,9 +2786,6 @@ function escapeHtml(s) {
 function modeTag(mode) {
   const color = mode === "SWING" ? "bg-purple-900/60 text-purple-300" : mode === "SCALPING_B" ? "bg-cyan-900/60 text-cyan-300" : "bg-blue-900/60 text-blue-300";
   return `<span class="tag ${color}">${escapeHtml(modeLabel(mode))}</span>`;
-}
-function tfHierarchy(htf, entryTf) {
-  return `<span class="text-sky-300 font-semibold">${escapeHtml(htf)}</span> <span class="text-slate-600">→</span> <span class="text-emerald-300 font-semibold">${escapeHtml(entryTf)}</span>`;
 }
 async function api(path, method = "GET", body = null) {
   const opts = { method, headers: { "Content-Type": "application/json" } };
@@ -2757,8 +2854,10 @@ function toggleLanguage() { state.lang = isAr() ? "en" : "ar"; applyLanguage(); 
 function rebuildSymbolSelect() {
   const sel = document.getElementById("selSymbol"); if (!sel) return;
   const cur = sel.value || "XAU/USD";
-  sel.innerHTML = Object.keys(SYMBOLS).map(s => `<option value="${s}">${escapeHtml(s)} · ${escapeHtml(symLabel(s))}</option>`).join("");
-  sel.value = cur;
+  // ★ v7.1: only tradeable symbols
+  sel.innerHTML = TRADEABLE_SYMBOL_KEYS.map(s => `<option value="${s}">${escapeHtml(s)} · ${escapeHtml(symLabel(s))}</option>`).join("");
+  if (TRADEABLE_SYMBOL_KEYS.includes(cur)) sel.value = cur;
+  else sel.value = "XAU/USD";
 }
 function rebuildStrategySelect() {
   const sel = document.getElementById("selStrategy"); if (!sel) return;
@@ -2791,8 +2890,10 @@ function renderPrices(data) {
     const arrow = p.change_pct > 0 ? "▲" : p.change_pct < 0 ? "▼" : "—";
     const srcCls = p.stale ? "feed-stale" : "feed-live";
     const srcTxt = p.stale ? t("stale") : t("live");
+    const isTradeable = p.tradeable !== false;
+    const tradeableBadge = isTradeable ? "" : `<span class="tag bg-slate-800/80 text-slate-400 ml-1">DISPLAY</span>`;
     html += `<div class="card rounded-xl p-3 ${flash}">
-      <div class="flex items-center justify-between"><div class="text-[11px] font-bold text-slate-200 tracking-wider">${escapeHtml(sym)}</div><div class="text-[10px] ${pctColor} tabnum">${arrow} ${Math.abs(p.change_pct).toFixed(2)}%</div></div>
+      <div class="flex items-center justify-between"><div class="text-[11px] font-bold text-slate-200 tracking-wider">${escapeHtml(sym)} ${tradeableBadge}</div><div class="text-[10px] ${pctColor} tabnum">${arrow} ${Math.abs(p.change_pct).toFixed(2)}%</div></div>
       <div class="text-xl font-bold text-white tabnum mt-1">${fmt(sym, p.price)}</div>
       <div class="text-[10px] text-slate-500 tabnum mt-1 flex justify-between"><span>H: ${fmt(sym, p.high)}</span><span>L: ${fmt(sym, p.low)}</span></div>
       <div class="mt-1">${sparkline(p.history)}</div>
@@ -2815,10 +2916,13 @@ function renderMarketStatus(ms) {
   const title = document.getElementById("msTitle");
   const sub = document.getElementById("msSubtitle");
   const countdownBox = document.getElementById("msCountdownBox");
+  const countdownLabel = document.getElementById("msCountdownLabel");
 
   banner.classList.remove("hidden");
 
   const liq = ms.liquidity;
+  const newsActive = !!(ms.news_blackout && ms.news_blackout.active);
+
   if (ms.is_closed) {
     inner.className = "rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 market-closed-banner";
     icon.textContent = "🔴";
@@ -2829,12 +2933,23 @@ function renderMarketStatus(ms) {
       sub.textContent = isAr() ? "استراحة يومية" : "Daily Break";
     }
     countdownBox.classList.remove("hidden");
+    if (countdownLabel) countdownLabel.textContent = t("reopens_in");
+  } else if (newsActive) {
+    // ★ v7.1: News blackout banner
+    inner.className = "rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 news-banner";
+    icon.textContent = "📰";
+    title.textContent = isAr() ? "توقف الأخبار المؤثرة" : "High-Impact News Blackout";
+    const evName = isAr() ? (ms.news_blackout.event_ar || ms.news_blackout.event_en) : ms.news_blackout.event_en;
+    sub.textContent = `${evName} · ${ms.news_blackout.currency} · ${ms.news_blackout.impact}`;
+    countdownBox.classList.remove("hidden");
+    if (countdownLabel) countdownLabel.textContent = t("resumes_in");
   } else if (ms.is_daily_break) {
     inner.className = "rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 bg-amber-950/60 border border-amber-700/60";
     icon.textContent = "🟡";
     title.textContent = isAr() ? "استراحة يومية" : "Daily Break";
     sub.textContent = isAr() ? "سيولة ضعيفة مؤقتاً — إعادة الفتح قريباً" : "Weak liquidity — reopens soon";
     countdownBox.classList.remove("hidden");
+    if (countdownLabel) countdownLabel.textContent = t("reopens_in");
   } else {
     const liqMap = { high: "bg-emerald-950/60 border border-emerald-700/60", moderate: "bg-sky-950/60 border border-sky-700/60", weak: "bg-rose-950/60 border border-rose-700/60" };
     inner.className = `rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 ${liqMap[liq.level] || liqMap.moderate}`;
@@ -2858,16 +2973,20 @@ function renderMarketStatus(ms) {
 }
 
 function updateCountdown() {
-  if (!state.marketStatus || !state.marketStatus.next_open) return;
-  const target = new Date(state.marketStatus.next_open).getTime();
-  const diff = Math.max(0, target - Date.now());
+  if (!state.marketStatus) return;
+  let target = null;
+  const ms = state.marketStatus;
+  // Priority: closed/daily-break → next_open; else news blackout → blackout_end
+  if (ms.is_closed || ms.is_daily_break) {
+    if (ms.next_open) target = new Date(ms.next_open).getTime();
+  } else if (ms.news_blackout && ms.news_blackout.active && ms.news_blackout.blackout_end) {
+    target = new Date(ms.news_blackout.blackout_end).getTime();
+  }
   const cdEl = document.getElementById("msCountdown");
   if (!cdEl) return;
-  if (diff <= 0) {
-    cdEl.textContent = "00:00:00";
-    pollMarketStatus();
-    return;
-  }
+  if (target === null) { cdEl.textContent = "00:00:00"; return; }
+  const diff = Math.max(0, target - Date.now());
+  if (diff <= 0) { cdEl.textContent = "00:00:00"; pollMarketStatus(); return; }
   const totalSec = Math.floor(diff / 1000);
   const days = Math.floor(totalSec / 86400);
   const hours = Math.floor((totalSec % 86400) / 3600);
@@ -2916,7 +3035,7 @@ function renderMarketBias(bias) {
 
   const trendEl = document.getElementById("biasWithTrendDisplay");
   if (bias.guardrail_active && bias.direction === "bullish_usd") {
-    trendEl.textContent = isAr() ? "DXY · USD/JPY شراء" : "DXY · USD/JPY · BUY";
+    trendEl.textContent = isAr() ? "USD/JPY شراء" : "USD/JPY · BUY";
     trendEl.className = "text-[11px] font-semibold text-rose-300 mt-1";
   } else if (bias.guardrail_active && bias.direction === "bearish_usd") {
     trendEl.textContent = isAr() ? "XAU · XAG · EUR · GBP شراء" : "XAU · XAG · EUR · GBP · BUY";
@@ -2962,9 +3081,18 @@ function updateGuardrail() {
 
   if (state.marketStatus && !state.marketStatus.is_open) {
     blocked = true;
-    reason = state.marketStatus.is_closed
-      ? (isAr() ? "السوق مغلق — لا يمكن فتح صفقات جديدة" : "Market is closed — cannot open new trades")
-      : (isAr() ? "استراحة يومية — الصفقات محظورة مؤقتاً" : "Daily break — trades temporarily blocked");
+    if (state.marketStatus.is_closed) {
+      reason = isAr() ? "السوق مغلق — لا يمكن فتح صفقات جديدة" : "Market is closed — cannot open new trades";
+    } else if (state.marketStatus.news_blackout && state.marketStatus.news_blackout.active) {
+      const nb = state.marketStatus.news_blackout;
+      const ev = isAr() ? (nb.event_ar || nb.event_en) : nb.event_en;
+      const mins = Math.max(1, Math.ceil((nb.resume_in_sec || 0) / 60));
+      reason = isAr()
+        ? `توقف الأخبار المؤثرة: ${ev} — يستأنف بعد ${mins} دقيقة`
+        : `News Blackout: ${ev} — resumes in ${mins} min`;
+    } else {
+      reason = isAr() ? "استراحة يومية — الصفقات محظورة مؤقتاً" : "Daily break — trades temporarily blocked";
+    }
     btnForce.classList.add("hidden");
   } else if (state.marketStatus && !state.marketStatus.liquidity.allow_trades) {
     blocked = true;
@@ -3017,6 +3145,7 @@ function renderAutopilot(ap) {
     const st = ap.stats.status || "idle";
     let chipText = "● " + t("ap_scanning");
     if (st === "market_closed") chipText = "⏸ " + (isAr() ? "السوق مغلق" : "Market Closed");
+    else if (st === "news_blackout") chipText = "📰 " + (isAr() ? "توقف الأخبار" : "News Blackout");
     else if (st === "no_setup") chipText = "🔍 " + (isAr() ? "لا إعداد" : "No Setup");
     else if (st.startsWith("cooldown")) chipText = "⏱ " + st;
     else if (st.startsWith("liquidity")) chipText = "💧 " + st;
@@ -3472,6 +3601,8 @@ def main():
     print(f"[startup] DB: {DB_PATH}", flush=True)
     print(f"[startup] Listening on http://{HOST}:{PORT}", flush=True)
     print(f"[startup] Bias guardrail threshold: ±{BIAS_GUARDRAIL_THRESHOLD}", flush=True)
+    print(f"[startup] Tradeable symbols: {sorted(TRADEABLE_SYMBOLS)}", flush=True)
+    print(f"[startup] News blackout: -{NEWS_BLACKOUT_BEFORE_MIN}min / +{NEWS_BLACKOUT_AFTER_MIN}min", flush=True)
 
     threads = [
         threading.Thread(target=price_feed_loop,   daemon=True, name="price_feed"),
